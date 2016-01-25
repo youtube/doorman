@@ -1,0 +1,3 @@
+etcd: etcd --data-dir /tmp/etcd.data$PORT
+doorman: doorman -logtostderr -config=./config.prototext -port=$PORT -debug_port=$(expr $PORT + 50) -etcd_endpoints=http://localhost:2379 -master_election_lock=/doorman.master
+

@@ -1,0 +1,1 @@
+concurrency: doorman=3,etcd=1
