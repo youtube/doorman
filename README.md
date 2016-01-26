@@ -9,13 +9,9 @@ We currently support [etcd](https://github.com/coreos/etcd), but it should be re
 
 ## Getting Started
 
-### Getting Doorman
+- Read the [high-level overview](doc/how_it_works.md).
 
-### Running a single Doorman server
-
-### Running a single level Doorman cluster
-
-### Running a multi-level Doorman installation
+- Read the [design doc](doc/design.md).
 
 ## Contributing
 
