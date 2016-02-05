@@ -56,8 +56,9 @@ During the learning mode of a resource every request will be answered with a new
 Doorman requires the clients to inform it of the desired capacity (the so-called *wants*). If you are using the low-level Doorman client you need to figure out your capacity need and call the appropriate methods to make sure that the client library requests that amount of capacity during its refresh cycle. However if you use the rate limiter objects provided by the Doorman clients the desired capacity is determined automatically by observing the behavior of the threads that want to access the resource. This automatic wants determination uses a moving average to smoothen out any spikes.
 
 ### Next steps
-
-Read the in-depth [design doc](doc/design.md).
+- Read more about available [algorithms](doc/algorithms.md).
+- Read about Doorman's [configuration](doc/configuration.md).
+- Read the in-depth [design doc](doc/design.md).
 
 ## Contributing
 
