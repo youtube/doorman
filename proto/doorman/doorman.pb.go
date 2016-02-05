@@ -245,7 +245,7 @@ func (m *ResourceResponse) GetSafeCapacity() float64 {
 }
 
 // This message type is used when the server wants to convey the
-// BNS address of a master. If the the optional master_address field
+// address of a master. If the the optional master_address field
 // is not there that means that the server wants to tell us who
 // the master is, but it doesn't know.
 type Mastership struct {
@@ -681,7 +681,7 @@ func (m *ResourceRepository) GetResources() []*ResourceTemplate {
 	return nil
 }
 
-// The request to obtain the master's BNS address.
+// The request to obtain the master's address.
 type DiscoveryRequest struct {
 	XXX_unrecognized []byte `json:"-"`
 }
@@ -691,7 +691,7 @@ func (m *DiscoveryRequest) String() string            { return proto.CompactText
 func (*DiscoveryRequest) ProtoMessage()               {}
 func (*DiscoveryRequest) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{17} }
 
-// The response containing the master's BNS address.
+// The response containing the master's address.
 type DiscoveryResponse struct {
 	Mastership       *Mastership `protobuf:"bytes,1,req,name=mastership" json:"mastership,omitempty"`
 	IsMaster         *bool       `protobuf:"varint,2,req,name=is_master" json:"is_master,omitempty"`
