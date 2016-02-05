@@ -51,7 +51,7 @@ message ResourceResponse {
 }
 
 // This message type is used when the server wants to convey the
-// BNS address of a master. If the the optional master_address field
+// address of a master. If the the optional master_address field
 // is not there that means that the server wants to tell us who
 // the master is, but it doesn't know.
 message Mastership {
@@ -197,11 +197,11 @@ message ResourceRepository {
   repeated ResourceTemplate resources = 1;
 }
 
-// The request to obtain the master's BNS address.
+// The request to obtain the master's address.
 message DiscoveryRequest {
 }
 
-// The response containing the master's BNS address.
+// The response containing the master's address.
 message DiscoveryResponse {
   required Mastership mastership = 1;
   required bool is_master = 2;
