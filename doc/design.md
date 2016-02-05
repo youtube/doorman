@@ -2,7 +2,7 @@
 
 Authors: Jos Visser <josv@google.com>, Ric Szopa <ryszard.szopa@gmail.com>
 
-**Note**: This is the original Doorman design doc with references to internal Google products and services removed.
+**Note**: This is the original Doorman design doc with references to internal Google products and services removed. Some protobuf definitions may be out of date, but the general ideas have not changed.
 
 ## Introduction
 
