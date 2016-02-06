@@ -79,6 +79,8 @@ func (res *Resource) SetSafeCapacity(resp *pb.ResourceResponse) {
 	// configured we return a dynamic safe capacity which equals
 	// the capacity divided by the number of clients that we
 	// know about.
+	// TODO(josv): The calculation of the dynamic safe capacity
+	// needs to take sub clients into account (in a multi-server tree).
 	if res.config.SafeCapacity == nil {
 		resp.SafeCapacity = proto.Float64(*res.config.Capacity / float64(res.store.Count()))
 	} else {

@@ -1,10 +1,10 @@
 # Configuration
 
-Doorman works off a global configuration that defines resource templates with all the information needed to apportion and distribute capacity to clients.
+Doorman works off of a global configuration that defines resource templates with all the information needed to apportion and distribute capacity to clients.
 
 Proto: doorman.proto (message 'ResourceRepository')
 
-The configuration consists of a repeated group of resource template. Each resource template configures a group of resources which are identical except for their actual resource identifier. Shell style globbing is used to determine which resource template applies to a request for capacity.
+The configuration consists of a repeated group of resource templates. Each resource template configures a group of resources that are identical except for their actual resource identifier. Shell style globbing is used to determine which resource template applies to a request for capacity.
 
 Every Doorman server contains an overview of the current configuration on its /debug/status page.
 
@@ -16,11 +16,11 @@ A shell glob that is used to figure out which template applies to which resource
 
 ### capacity (double)
 
-The maximum global capacity of the resource. This is the maximum that Doorman will hand out. Doorman is agnostic about units, but typically this number can be thought of as the maximum qps the resource can take.
+The maximum global capacity of the resource. This is the maximum that Doorman will hand out. Doorman is agnostic about units, but typically this number can be thought of as the maximum qps the resource can take (a rate) or the maximum in-flight transactions that it can handle (a gauge).
 
 ### safe_capacity (double)
 
-The "safe capacity" for a resource is the capacity the Doorman client will use in case the Doorman server is unavailable. If you set this to -1 Doorman rate limiting will be disabled in case Doorman is down. If you set it to 0 clients will stop using the resource altogether. If you set it to a positive number each client will act as if it had received that capacity assignment from the Doorman server. 
+The "safe capacity" for a resource is the capacity the Doorman client will use in case the Doorman server is unavailable. If you set this to -1 Doorman rate limiting will be disabled in case Doorman is down. If you set it to 0 clients will stop using the resource altogether. If you set it to a positive number each client will act as if it had received that capacity assignment from the Doorman server. If you do not specify the safe_capacity the Doorman server calculates a dynamic safe capacity that equals the maximum configured capacity divided by the number of clients that the Doorman server knows about. 
 
 ### description (string)
 
@@ -40,7 +40,7 @@ The interval (in seconds) after which the client is requested to contact the Doo
 
 ### Algorithm.learning_mode_duration (int64)
 
-The duration of the Doorman server's learning mode for this resource. Please see the page on "How it Works" for information about the learning mode. Unless you totally know what you are doing you should probably leave this field unspecified.
+The duration of the Doorman server's learning mode for this resource. Please see the page on "How it Works" for information about the learning mode. Unless you totes know what you are doing you should probably leave this field unspecified.
 
 ### Algorithm.NamedParameter.name and Algorithm.NamedParameter.value (string)
 
