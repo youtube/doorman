@@ -1,0 +1,87 @@
+import "lease.proto";
+
+// If the request contains a list of resource identifiers the response may contain
+// the safe capacities for these resources (if safe capacities have been configured).
+// This means that the Discovery RPC can also be used to obtain the safe capacities.
+message DiscoveryRequest {
+  required string client_id = 1;
+  repeated string resource_id = 2;
+}
+
+// Encapsulates the safe capacity for a resource.
+message SafeCapacity {
+  required string resource_id = 1;
+  required double safe_capacity = 2;
+}
+
+// The response to a Discovery RPC contains the BNS address of the master (if it is 
+// known) and optionally one or more safe capacities (if the request contained
+// resource identifiers that the client wants to know the safe capacities for).
+message DiscoveryResponse {
+  optional string master_bns = 1;
+  repeated SafeCapacity safe_capacity = 2;
+}
+
+// Encapsulates the information we need to send to get capacity for a single resource.
+message SingleResourceCapacityRequest {
+  required string resource_id = 1;
+  required int32 priority = 2;
+  optional CapacityLease has = 3;
+  required double wants = 5;
+}
+
+// The GetCapacityRequest contains the identifier of the client making the request and
+// a list of single resource capacity request protocol buffers.
+message GetCapacityRequest {
+  required string client_id = 1;
+  repeated SingleResourceCapacityRequest resource = 2;
+}
+
+// Contains the capacity allocated by the server for a single resource.
+message SingleResourceCapacityResponse {
+  required string resource_id = 1;
+  required CapacityLease gets = 2;
+  optional double safe_capacity = 4;
+}
+
+// The response to a GetCapacity request is a list of protocol buffers specifying
+// the capacity for a single resource.
+message GetCapacityResponse {
+  repeated SingleResourceCapacityResponse response = 1;
+}
+
+message ReleaseCapacityRequest {
+  required string client_id = 1;
+  repeated string resource_id = 2;
+}
+
+message ReleaseCapacityResponse {
+}
+
+message PriorityBandAggregate {
+  required int32 priority = 1;
+  required int32 num_clients = 2;
+  required double wants = 3;
+}
+
+message ServerCapacityResourceRequest {
+  required string resource_id = 1;
+  optional CapacityLease has = 2;
+  required double outstanding = 3;
+  repeated PriorityBandAggregate wants = 4;
+}
+
+message GetServerCapacityRequest {
+  required string server_id = 1;
+  repeated ServerCapacityResourceRequest resource = 2;
+}
+
+message ServerCapacityResourceResponse {
+  required string resource_id = 1;
+  required CapacityLease gets = 2;
+}
+
+message GetServerCapacityResponse {
+  repeated ServerCapacityResourceResponse resource = 1;
+}
+

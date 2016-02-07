@@ -1,0 +1,9 @@
+// lease.proto
+
+// Encapsulates a lease on capacity with a start_time and expiry_time in seconds
+// since the epoch.
+message CapacityLease {
+  required int32 expiry_time = 1;
+  required int32 refresh_interval = 2;
+  required double capacity = 3;
+}

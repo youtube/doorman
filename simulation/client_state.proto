@@ -1,0 +1,18 @@
+// client_state.proto
+
+import "lease.proto";
+
+// The state a client needs to keep for every resource it wants to talk to.
+message ClientResourceState {
+  required string resource_id = 1;
+  required int32 priority = 2;
+  optional CapacityLease has = 3;
+  optional double safe_capacity = 4;
+  required double wants = 5;
+}
+
+// The client state consists of a list of resource states.
+message ClientState {
+  required string client_id = 1;
+  repeated ClientResourceState resource = 2;
+}

@@ -1,0 +1,33 @@
+// config.proto
+
+// This protocol buffer encapsulates a name/value pair which is used to
+// configure an Algorithm (see below).
+message NamedParameter {
+  required string name = 1;
+  optional string value = 2;
+}
+
+// This protocol buffer describes and algorithm (and its parameters) for distributing
+// capacity between clients.
+message Algorithm {
+  required string name = 1;
+  repeated NamedParameter param = 2;
+}
+
+// Resource configuration template. This template is used to instantiate the actual
+// configuration for a resource based on a match with the identifier_re regular
+// expression.
+message ResourceTemplate {
+  required string identifier_re = 1; // Regular expression
+  required double capacity = 2;      // Capacity in service units
+  optional double safe_capacity = 3; // Capacity to use in “safe” mode
+  required int32 owner411 = 4;       // The go/yt411 id of the resource owner
+  optional Algorithm algorithm = 5;  // Algorithm used to divide capacity between clients
+  optional string description = 6;
+}
+
+// The resource configuration consists of a list of templates.
+message ResourceRepository {
+  repeated ResourceTemplate resource = 1;
+  required Algorithm default_algorithm = 2;
+}

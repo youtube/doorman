@@ -1,0 +1,45 @@
+import "config.proto";
+import "lease.proto";
+import "protocol.proto";
+
+// This protocol buffer encapsulates the state a server maintains for a client/resource
+// combination. Note: This is for actual clients, not for rate limiting servers at 
+// a higher position in the server tree.
+message PerClientResourceState {
+  required string client_id = 1;
+  required int32 last_request_time = 2;
+  required int32 priority = 3;
+  optional CapacityLease has = 4;
+  required double wants = 5;
+}
+
+// This protocol buffer encapsulates the state a server maintains for a single resource
+// and a higher level server (a server at a higher level in the server tree that uses
+// this server to get capacity on behalf of its clients). The state consists of a list
+// of aggregated client needs per priority band.
+message PerServerResourceState {
+  required string server_id = 1;
+  required int32 last_request_time = 2;
+  optional CapacityLease has = 3;
+  required double outstanding = 4;
+  repeated PriorityBandAggregate wants = 5;
+}
+
+// This protocol buffer encapsulates the server state for a single resource
+message ServerPerResourceState {
+  required string resource_id = 1;
+  required int32 learning_mode_expiry_time = 2;
+  required ResourceTemplate template = 3;
+  optional CapacityLease has = 4;
+  repeated PerClientResourceState client = 5;
+  repeated PerServerResourceState server = 6;
+}
+
+// The server state object contains a list of state per resource that the server has
+// been asked about.
+message ServerState {
+  required string server_id = 1;
+  required int32 server_level = 2;
+  optional int32 election_victory_time = 3;
+  repeated ServerPerResourceState resource = 4;
+}
