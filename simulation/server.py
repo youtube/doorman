@@ -370,7 +370,7 @@ class Server(object):
            resp.gets.expiry_time - now, resp.gets.refresh_interval))
 
     assert response.IsInitialized()
- 
+
     gauge.stop_timer()
 
     return response

@@ -49,13 +49,15 @@ class Counter(object):
   # Increases the counter.
   def inc(self, n=1):
     self.value += n
-  
+
   # Returns the current value of the counter.
   def get_value(self):
     return self.value
-    
+
 # A simple gauge class used for some basic instrumentation. The
 # Gauge maintains minimum, maximum and average values as well.
+
+
 class Gauge(object):
   # This class member contains references to all gauges in
   # existence.
@@ -93,7 +95,7 @@ class Gauge(object):
     self.value = value
     self.max_value = max(value, self.max_value)
     self.min_value = min(value, self.min_value)
-    self.n +=1
+    self.n += 1
     self.average = ((self.n - 1) * self.average) / self.n + self.value / self.n
 
   # Starts a timer. This can be used to time certain actions. The gauge gets
@@ -112,7 +114,7 @@ class Gauge(object):
     assert self.timer_start != 0
     self.set(time.time() - self.timer_start)
     self.reset_timer()
-  
+
   # Returns the current value of the gauge.
   def get_value(self):
     return self.value

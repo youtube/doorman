@@ -363,9 +363,13 @@ class ServerStateWrapper(object):
       n = sum_leases(resource)
 
       if resp.gets.capacity < n:
-        logger.warning('%s shortfall for %s: getting %lf, but has %lf outstanding leases' % (self.get_server_id(), resource.resource_id, resp.gets.capacity, n))
+        logger.warning(
+            '%s shortfall for %s: getting %lf, but has %lf outstanding leases' %
+            (self.get_server_id(), resource.resource_id,
+             resp.gets.capacity, n))
         Counter.get('server_capacity_shortfall').inc()
-        Gauge.get('server.%s.shortfall' % self.get_server_id()).set(resp.gets.capacity - n)
+        Gauge.get('server.%s.shortfall' %
+                  self.get_server_id()).set(resp.gets.capacity - n)
 
       resource.has.CopyFrom(resp.gets)
 

@@ -48,7 +48,11 @@ class ServerJob(object):
   # Returns a random job.
   @classmethod
   def get_random_server_job(self):
-    return self.all_server_jobs_list[random.randint(0, len(self.all_server_jobs_list) - 1)]
+    return self.all_server_jobs_list[random.randint(
+        0,
+        len(
+            self.all_server_jobs_list) -
+        1)]
 
   def get_job_name(self):
     return self.job_name

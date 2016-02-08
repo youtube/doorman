@@ -106,7 +106,9 @@ class Client(object):
   # Returns a random client
   @classmethod
   def get_random_client(self):
-    return self.all_clients_list[random.randint(0, len(self.all_clients_list) - 1)]
+    return self.all_clients_list[random.randint(
+        0,
+        len(self.all_clients_list) - 1)]
 
   # Sets the wanted capacity for this client and resource.
   def set_wants(self, resource_id, wants):

@@ -58,6 +58,8 @@ def sum_leases(resource):
 # of the server. In a time of shrinking allocations a server might
 # have more outstanding responsibilities than it has capacity to
 # give out. We call this phenomenon 'shortfall'.
+
+
 def sum_outstanding(resource):
   return sum([
       client.has.capacity for client in resource.client

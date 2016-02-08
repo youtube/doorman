@@ -145,7 +145,7 @@ class Reporter(object):
     for client in sorted(self.all_clients):
       print >>fout, '"%s"' % client, ',,',
 
-    print >>fout,',',
+    print >>fout, ',',
 
     for server in sorted(self.all_server_jobs):
       print >>fout, '"%s"' % server, ',,,,',
@@ -179,8 +179,8 @@ class Reporter(object):
       if s == 'clients':
         print >>fout, '"total_wants", "total_has",',
       else:
-        print >>fout, '"total_wants", "total_has", "total_leases", "total_outstanding",',
-
+        print >>fout, ('"total_wants", "total_has", "total_leases", '
+                       '"total_outstanding",'),
 
     print >>fout
 
@@ -253,7 +253,8 @@ class Reporter(object):
 
     for name in sorted(names):
       gauge = Gauge.get(name)
-      print >>fout, gauge.get_name(), ',', gauge.get_count(), ',', gauge.get_min_value(), ',', gauge.get_average(), ',', gauge.get_max_value()
+      print >>fout, gauge.get_name(), ',', gauge.get_count(), ',', gauge.get_min_value(
+          ), ',', gauge.get_average(), ',', gauge.get_max_value()
 
     # Closes the output file.
     if self.filename:
