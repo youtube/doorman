@@ -104,8 +104,6 @@ See [CONTRIBUTING](CONTRIBUTING.md) for details on submitting patches and the co
 ## License
 Doorman is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.
 
-## Status
-
 ## Note
 This is not an official Google product.
 
