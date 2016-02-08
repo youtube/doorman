@@ -60,12 +60,51 @@ Doorman requires the clients to inform it of the desired capacity (the so-called
 - Read about Doorman's [configuration](doc/configuration.md).
 - Read the in-depth [design doc](doc/design.md).
 
+## Status and Plans
+
+Doorman should be currently considered Alpha quality software. The server and Go client received a decent amount of testing at Google (both functional and load testing), so we are pretty confident they do what they are supposed to do. However, in the process of open-sourcing the code we switched from internal Google technologies to their Open Source equivalents – and this needs more testing. Finally, there's no proper versioning scheme at the moment.
+
+Short term plans:
++ C++ client;
++ Python client;
++ Docker image;
+
+Longer term plans:
++ Ruby client;
++ Proper semantic versioning.
+
+## Installation
+
+First, you need to set up your environment.
+
+```sh
+export GOPATH=...
+export GO15VENDOREXPERIMENT=1
+```
+
+This is the location where Go keeps all its sources and binary artifacts: the doorman executable binary will go to `$GOPATH/bin/doorman`. `$GO15VENDOREXPERIMENT` needs to be set to allow easy vendoring (see https://golang.org/s/go15vendor). It will cease to be necessary as of Go 1.6.
+
+With this out of the way, Doorman is just one go get away:
+
+```sh
+go get github.com/youtube/doorman/go/cmd/doorman
+```
+
+If you are interested in a checkout of Doorman that you can modify, you can do:
+
+```sh
+mkdir -p $GOPATH/src/github.com/youtube
+git clone git@github.com:youtube/doorman.git
+```
+
 ## Contributing
 
 See [CONTRIBUTING](CONTRIBUTING.md) for details on submitting patches and the contribution workflow.
 
 ## License
 Doorman is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.
+
+## Status
 
 ## Note
 This is not an official Google product.
