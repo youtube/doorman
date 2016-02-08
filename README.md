@@ -2,6 +2,8 @@
 
 *Got a party? Want your guests to behave? You need a Doorman!*
 
+[![Build Status](https://travis-ci.org/youtube/doorman.png?branch=master)](https://travis-ci.org/youtube/doorman)
+
 Doorman is a solution for Global Distributed Client Side Rate Limiting. Clients that talk to a shared resource (such as a database, a gRPC service, a RESTful API, or whatever) can use Doorman to voluntarily limit their use (usually in requests per second) of the resource.
 
 Doorman is written in Go and uses [gRPC](http://www.grpc.io/) as its communication protocol. For some high-availability features it needs [distributed lock manager](https://en.wikipedia.org/wiki/Distributed_lock_manager).
@@ -59,6 +61,7 @@ Doorman requires the clients to inform it of the desired capacity (the so-called
 - Read more about available [algorithms](doc/algorithms.md).
 - Read about Doorman's [configuration](doc/configuration.md).
 - Read the in-depth [design doc](doc/design.md).
+- Read the [client documentation](https://godoc.org/github.com/youtube/doorman/go/client/doorman).
 
 ## Status and Plans
 
