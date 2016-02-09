@@ -6,6 +6,11 @@
 	],
 	"Deps": [
 		{
+			"ImportPath": "github.com/chzyer/readline",
+			"Comment": "v1.1-16-g1aa557f",
+			"Rev": "1aa557f19e1289056e080e3f3c07ecb7ea45b665"
+		},
+		{
 			"ImportPath": "github.com/coreos/etcd/Godeps/_workspace/src/github.com/ugorji/go/codec",
 			"Comment": "v2.3.0-alpha.0-522-g6eb0b35",
 			"Rev": "6eb0b35ed3a3ed3b2eb686d8a9dc493157caaadd"
@@ -37,6 +42,14 @@
 		{
 			"ImportPath": "github.com/golang/protobuf/proto",
 			"Rev": "2402d76f3d41f928c7902a765dfc872356dd3aad"
+		},
+		{
+			"ImportPath": "github.com/google/shlex",
+			"Rev": "6f45313302b9c56850fc17f99e40caebce98c716"
+		},
+		{
+			"ImportPath": "golang.org/x/crypto/ssh/terminal",
+			"Rev": "1f22c0103821b9390939b6776727195525381532"
 		},
 		{
 			"ImportPath": "golang.org/x/net/context",
