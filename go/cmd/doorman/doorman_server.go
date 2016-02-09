@@ -51,8 +51,8 @@ var (
 	debugPort  = flag.Int("debug_port", 8081, "port to bind for HTTP debug info")
 	serverRole = flag.String("server_role", "root", "Role of this server in the server tree")
 	parent     = flag.String("parent", "", "Address of the parent server which this server connects to")
-
-	config = flag.String("config", "", "file to load the config from (text protobufs)")
+	hostname   = flag.String("hostname", "", "Use this as the hostname (if empty, use whatever the kernel reports")
+	config     = flag.String("config", "", "file to load the config from (text protobufs)")
 
 	rpcDialTimeout = flag.Duration("doorman_rpc_dial_timeout", 5*time.Second, "timeout to use for connecting to the doorman server")
 
@@ -119,16 +119,18 @@ No resources in the store.
 `
 )
 
-// getServerID returns a unique server id, consisting of a host:pid id.
+// getServerID returns a unique server id, consisting of a host:port id.
 func getServerID(port int) string {
-
-	hostname, err := os.Hostname()
+	if *hostname != "" {
+		return fmt.Sprintf("%s:%d", *hostname, port)
+	}
+	hn, err := os.Hostname()
 
 	if err != nil {
-		hostname = "unknown.localhost"
+		hn = "unknown.localhost"
 	}
 
-	return fmt.Sprintf("%s:%d", hostname, port)
+	return fmt.Sprintf("%s:%d", hn, port)
 }
 
 func main() {
@@ -214,10 +216,10 @@ func main() {
 		}
 	}()
 
-	// FIXME(ryszard): Add some sort of statusz capabilities.
 	status.AddStatusPart("Doorman", statusz, func(context.Context) interface{} { return dm.Status() })
-	// // Adds this new Doorman server for /statusz and /resourcez.
-	// server.AddStatuszPart("Doorman", statusz, func(context.Context) interface{} { return dm.Status() })
+
+	// Redirect form / to /debug/status.
+	http.Handle("/", http.RedirectHandler("/debug/status", http.StatusMovedPermanently))
 	AddServer(dm)
 
 	go http.ListenAndServe(fmt.Sprintf(":%v", *debugPort), nil)
