@@ -15,7 +15,6 @@
 package main
 
 import (
-	_ "expvar"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -40,6 +39,9 @@ import (
 	"github.com/youtube/doorman/go/status"
 
 	pb "github.com/youtube/doorman/proto/doorman"
+
+	_ "expvar"
+	_ "net/http/pprof"
 )
 
 var (
