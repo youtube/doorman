@@ -189,13 +189,17 @@ func (server *Server) performRequests(ctx context.Context, retryNumber int) (tim
 	// Creates new GetServerCapacityRequest.
 	in := &pb.GetServerCapacityRequest{ServerId: proto.String(server.ID)}
 
+	server.mu.RLock()
+
 	// Adds all resources in this client's resource registry to the request.
 	for id, resource := range server.resources {
+		status := resource.Status()
+
 		// For now we do not take into account clients with different
 		// priorities. That is why we form only one PriorityBandAggregate proto.
 		// Also, compose request only for the resource whose wants capacity > 0,
 		// because it makes no sense to ask for zero capacity.
-		if resource.store.SumWants() > 0 {
+		if status.SumWants > 0 {
 			in.Resource = append(in.Resource, &pb.ServerCapacityResourceRequest{
 				ResourceId: proto.String(id),
 				// TODO(rushanny): fill optional Has field which is of type Lease.
@@ -203,8 +207,8 @@ func (server *Server) performRequests(ctx context.Context, retryNumber int) (tim
 					{
 						// TODO(rushanny): replace defaultPriority with some client's priority.
 						Priority:   proto.Int64(int64(defaultPriority)),
-						NumClients: proto.Int64(resource.store.Count()),
-						Wants:      proto.Float64(resource.store.SumWants()),
+						NumClients: proto.Int64(status.Count),
+						Wants:      proto.Float64(status.SumWants),
 					},
 				},
 			})
@@ -216,6 +220,7 @@ func (server *Server) performRequests(ctx context.Context, retryNumber int) (tim
 	if len(server.resources) == 0 {
 		in.Resource = append(in.Resource, defaultServerCapacityResourceRequest)
 	}
+	server.mu.RUnlock()
 
 	if retryNumber > 0 {
 		log.Infof("GetServerCapacity: retry number %v: %v\n", retryNumber, in)
