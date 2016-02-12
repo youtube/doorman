@@ -3,7 +3,7 @@ language: go
 go:
   - 1.5
 
-script: go test ./go/...
+script: go test -race ./go/...
 
 env:
   - GO15VENDOREXPERIMENT=1
