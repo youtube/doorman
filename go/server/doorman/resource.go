@@ -204,5 +204,7 @@ func (res *Resource) Status() ResourceStatus {
 
 // ResourceLeaseStatus returns a read-only view of information the outstanding leases for this resource.
 func (res *Resource) ResourceLeaseStatus() ResourceLeaseStatus {
+	res.mu.RLock()
+	defer res.mu.RUnlock()
 	return res.store.ResourceLeaseStatus()
 }

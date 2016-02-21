@@ -843,8 +843,13 @@ func (server *Server) Status() ServerStatus {
 }
 
 // ResourceLeaseStatus returns a read-only view of of the leases on a resource owned by this server.
-func (server *Server) ResourceLeaseStatus(ID string) ResourceLeaseStatus {
+func (server *Server) ResourceLeaseStatus(id string) ResourceLeaseStatus {
 	server.mu.RLock()
 	defer server.mu.RUnlock()
-	return server.resources[ID].ResourceLeaseStatus()
+	res, ok := server.resources[id]
+	if !ok {
+		log.Errorf("ResourceLeaseStatus: no resource with ID %v. Returning empty status.", id)
+		return ResourceLeaseStatus{}
+	}
+	return res.ResourceLeaseStatus()
 }
