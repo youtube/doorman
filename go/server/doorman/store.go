@@ -17,8 +17,6 @@ package doorman
 import (
 	"flag"
 	"time"
-
-	log "github.com/golang/glog"
 )
 
 var cleaningInterval = flag.Duration("leasestore-cleanup-interval", 30*time.Second, "Cleaning interval of the lease store")
@@ -118,27 +116,10 @@ type leaseStoreImpl struct {
 
 // New returns a fresh LeaseStore implementation.
 func NewLeaseStore(id string) LeaseStore {
-	store := &leaseStoreImpl{
+	return &leaseStoreImpl{
 		id:     id,
 		leases: make(map[string]Lease),
 	}
-
-	// Starts a goroutine that regularly cleans the store of
-	// expired leases.
-	go func() {
-		tick := time.Tick(*cleaningInterval)
-
-		for {
-			select {
-			case <-tick:
-				if n := store.Clean(); n > 0 {
-					log.Infof("cleaning lease store for resource %s removed %d lease(s)", store.id, n)
-				}
-			}
-		}
-	}()
-
-	return store
 }
 
 func (store *leaseStoreImpl) Count() int64 {
