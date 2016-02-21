@@ -54,9 +54,10 @@ func TestGlobMatches(t *testing.T) {
 	}
 
 	res2 := s.getOrCreateResource("foo")
-	t.Logf("res1: %v %p, res2: %v %p", res, res, res2, res2)
+	t.Logf("res1: %#v %p, res2: %#v %p", res, res, res2, res2)
+	t.Logf("res1.store: %#v %p res2.store: %#v %p", res.store, res.store, res2.store, res2.store)
 	if res2 != res {
-		t.Errorf("s.getOrCreateResource: second call didn't get the same value: %v != %v", res2, res)
+		t.Errorf("s.getOrCreateResource: second call didn't get the same value: %#v != %#v", res2, res)
 	}
 
 }
@@ -85,9 +86,7 @@ func TestDecide(t *testing.T) {
 
 		resource := server.getOrCreateResource("resource")
 		resource.Decide(Request{
-			Store:      resource.store,
 			Client:     "new_client",
-			Capacity:   resource.capacity(),
 			Has:        0.0,
 			Wants:      10.0,
 			Subclients: 1,

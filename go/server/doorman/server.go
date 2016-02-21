@@ -693,8 +693,6 @@ func (server *Server) getCapacity(crequests []clientRequest, itemsC chan item) {
 	for _, creq := range crequests {
 		res := server.getOrCreateResource(creq.resID)
 		req := Request{
-			Store:      res.store,
-			Capacity:   res.capacity(),
 			Client:     creq.client,
 			Has:        creq.has,
 			Wants:      creq.wants,

@@ -31,15 +31,8 @@ const epsilon = 1e-6
 // Request specifies a requested capacity lease that an Algorithm may
 // grant.
 type Request struct {
-	// Store is a lease store that an algorithm will operate on.
-	Store LeaseStore
-
 	// Client is the identifier of a client requesting capacity.
 	Client string
-
-	// Capacity is the current total capacity available for some
-	// resource.
-	Capacity float64
 
 	// Has is the capacity the client claims it has been assigned
 	// previously.
@@ -52,8 +45,9 @@ type Request struct {
 	Subclients int64
 }
 
-// Algorithm is a function that takes a Request and returns the lease.
-type Algorithm func(request Request) Lease
+// Algorithm is a function that takes a LeaseStore, the total
+// available capacity, and a Request, and returns the lease.
+type Algorithm func(store LeaseStore, capacity float64, request Request) Lease
 
 func getAlgorithmParams(config *pb.Algorithm) (leaseLength, refreshInterval time.Duration) {
 	return time.Duration(config.GetLeaseLength()) * time.Second, time.Duration(config.GetRefreshInterval()) * time.Second
@@ -78,8 +72,8 @@ func maxF(left, right float64) float64 {
 func NoAlgorithm(config *pb.Algorithm) Algorithm {
 	length, interval := getAlgorithmParams(config)
 
-	return func(r Request) Lease {
-		return r.Store.Assign(r.Client, length, interval, r.Wants, r.Wants, r.Subclients)
+	return func(store LeaseStore, capacity float64, r Request) Lease {
+		return store.Assign(r.Client, length, interval, r.Wants, r.Wants, r.Subclients)
 	}
 }
 
@@ -90,8 +84,8 @@ func NoAlgorithm(config *pb.Algorithm) Algorithm {
 func Static(config *pb.Algorithm) Algorithm {
 	length, interval := getAlgorithmParams(config)
 
-	return func(r Request) Lease {
-		return r.Store.Assign(r.Client, length, interval, minF(r.Capacity, r.Wants), r.Wants, r.Subclients)
+	return func(store LeaseStore, capacity float64, r Request) Lease {
+		return store.Assign(r.Client, length, interval, minF(capacity, r.Wants), r.Wants, r.Subclients)
 	}
 }
 
@@ -106,19 +100,19 @@ func Static(config *pb.Algorithm) Algorithm {
 func FairShare(config *pb.Algorithm) Algorithm {
 	length, interval := getAlgorithmParams(config)
 
-	return func(r Request) Lease {
+	return func(store LeaseStore, capacity float64, r Request) Lease {
 		var (
-			count = r.Store.Count()
-			old   = r.Store.Get(r.Client)
+			count = store.Count()
+			old   = store.Get(r.Client)
 		)
 
 		// If this is a new client, we adjust the count.
-		if !r.Store.HasClient(r.Client) {
+		if !store.HasClient(r.Client) {
 			count += r.Subclients
 		}
 
 		// This is the equal share that every subclient should get.
-		equalShare := r.Capacity / float64(count)
+		equalShare := capacity / float64(count)
 
 		// This is the equal share that should be assigned to the current client
 		// based on the number of its subclients.
@@ -128,14 +122,14 @@ func FairShare(config *pb.Algorithm) Algorithm {
 		// the requesting client has no capacity). It is the maximum
 		// capacity that this run of the algorithm can assign to the
 		// requesting client.
-		unusedCapacity := r.Capacity - r.Store.SumHas() + old.Has
+		unusedCapacity := capacity - store.SumHas() + old.Has
 
 		// If the client wants less than its equal share or
 		// if the sum of what all clients want together is less
 		// than the available capacity we can give this client what
 		// it wants.
-		if r.Wants <= equalSharePerClient || r.Store.SumWants() <= r.Capacity {
-			return r.Store.Assign(r.Client, length, interval,
+		if r.Wants <= equalSharePerClient || store.SumWants() <= capacity {
+			return store.Assign(r.Client, length, interval,
 				minF(r.Wants, unusedCapacity), r.Wants, r.Subclients)
 		}
 
@@ -152,12 +146,12 @@ func FairShare(config *pb.Algorithm) Algorithm {
 
 		// Puts every client in the list to signify that they all
 		// still need capacity.
-		r.Store.Map(func(id string, lease Lease) {
+		store.Map(func(id string, lease Lease) {
 			clients.PushBack(id)
 		})
 
 		// This is the capacity that can still be divided.
-		availableCapacity := r.Capacity
+		availableCapacity := capacity
 
 		// The clients list now contains all the clients who still need/want
 		// capacity. We are going to divide the capacity in availableCapacity
@@ -168,7 +162,7 @@ func FairShare(config *pb.Algorithm) Algorithm {
 			clientsCopy := *clients
 			var subclients int64
 			for e := clientsCopy.Front(); e != nil; e = e.Next() {
-				subclients += r.Store.Subclients(e.Value.(string))
+				subclients += store.Subclients(e.Value.(string))
 			}
 
 			// This is the fair share that is available to all subclients
@@ -199,8 +193,8 @@ func FairShare(config *pb.Algorithm) Algorithm {
 					wants = r.Wants
 					subclients = r.Subclients
 				} else {
-					wants = r.Store.Get(id).Wants
-					subclients = r.Store.Subclients(id)
+					wants = store.Get(id).Wants
+					subclients = store.Subclients(id)
 				}
 
 				// stillNeeds is the capacity this client still needs to
@@ -239,7 +233,7 @@ func FairShare(config *pb.Algorithm) Algorithm {
 		// give out more than the currently unused capacity. If that
 		// is less than what the algorithm calculated this will get
 		// fixed in the next capacity refreshes.
-		return r.Store.Assign(r.Client, length, interval,
+		return store.Assign(r.Client, length, interval,
 			minF(gets[r.Client], unusedCapacity), r.Wants, r.Subclients)
 	}
 }
@@ -252,21 +246,21 @@ func FairShare(config *pb.Algorithm) Algorithm {
 func ProportionalShare(config *pb.Algorithm) Algorithm {
 	length, interval := getAlgorithmParams(config)
 
-	return func(r Request) Lease {
+	return func(store LeaseStore, capacity float64, r Request) Lease {
 		var (
-			count = r.Store.Count()
-			old   = r.Store.Get(r.Client)
+			count = store.Count()
+			old   = store.Get(r.Client)
 			gets  = 0.0
 		)
 
 		// If this is a new client, we adjust the count.
-		if !r.Store.HasClient(r.Client) {
+		if !store.HasClient(r.Client) {
 			count += r.Subclients
 		}
 
 		// This is the equal share that every subclient has an absolute
 		// claim on.
-		equalShare := r.Capacity / float64(count)
+		equalShare := capacity / float64(count)
 
 		// This is the equal share that should be assigned to the current client
 		// based on the number of its subclients.
@@ -276,14 +270,14 @@ func ProportionalShare(config *pb.Algorithm) Algorithm {
 		// the requesting client has no capacity). It is the maximum
 		// capacity that this run of the algorithm can assign to the
 		// requesting client.
-		unusedCapacity := r.Capacity - r.Store.SumHas() + old.Has
+		unusedCapacity := capacity - store.SumHas() + old.Has
 
 		// If the client wants less than it equal share or
 		// if the sum of what all clients want together is less
 		// than the available capacity we can give this client what
 		// it wants.
-		if r.Store.SumWants() <= r.Capacity || r.Wants <= equalSharePerClient {
-			return r.Store.Assign(r.Client, length, interval,
+		if store.SumWants() <= capacity || r.Wants <= equalSharePerClient {
+			return store.Assign(r.Client, length, interval,
 				minF(r.Wants, unusedCapacity), r.Wants, r.Subclients)
 		}
 
@@ -296,7 +290,7 @@ func ProportionalShare(config *pb.Algorithm) Algorithm {
 		extraCapacity := 0.0
 		extraNeed := 0.0
 
-		r.Store.Map(func(id string, lease Lease) {
+		store.Map(func(id string, lease Lease) {
 			var wants float64
 			var subclients int64
 
@@ -327,7 +321,7 @@ func ProportionalShare(config *pb.Algorithm) Algorithm {
 		// is less than what the algorithm calculated we will
 		// adjust this in the next capacity refreshes.
 
-		return r.Store.Assign(r.Client, length, interval,
+		return store.Assign(r.Client, length, interval,
 			minF(gets, unusedCapacity), r.Wants, r.Subclients)
 	}
 }
@@ -336,8 +330,8 @@ func ProportionalShare(config *pb.Algorithm) Algorithm {
 // the client the same capacity it reports it had before.
 func Learn(config *pb.Algorithm) Algorithm {
 	length, interval := getAlgorithmParams(config)
-	return func(r Request) Lease {
-		return r.Store.Assign(r.Client, length, interval, r.Has, r.Wants, r.Subclients)
+	return func(store LeaseStore, capacity float64, r Request) Lease {
+		return store.Assign(r.Client, length, interval, r.Has, r.Wants, r.Subclients)
 	}
 }
 

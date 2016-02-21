@@ -24,6 +24,13 @@ import (
 	pb "github.com/youtube/doorman/proto/doorman"
 )
 
+// NOTE(ryszard): Any exported Resource methods are responsible for
+// taking the lock. Any NOT exported methods, on the other hand, must
+// NOT take the lock, even to read. There can be multiple holders of a
+// read lock, but any attempt to get the write lock will block further
+// read locks. This means that getting a read lock recursively leads
+// to deadlocks that are very hard to debug.
+
 // Resource giving clients capacity leases to some resource. It is
 // safe to call or access any exported methods or properties from
 // multiple goroutines.
@@ -49,10 +56,10 @@ type Resource struct {
 	expiryTime *time.Time
 }
 
-// capacity returns the current available capacity for res.
+// capacity returns the current available capacity for res. Note: this
+// does not lock the resource, and should be called only when the
+// lock is already taken.
 func (res *Resource) capacity() float64 {
-	res.mu.RLock()
-	defer res.mu.RUnlock()
 
 	if res.expiryTime != nil && res.expiryTime.Before(time.Now()) {
 		// FIXME(rushanny): probably here should be a safe capacity instead.
@@ -99,10 +106,10 @@ func (res *Resource) Decide(request Request) Lease {
 	res.store.Clean()
 
 	if res.learningModeEndTime.After(time.Now()) {
-		log.Infof("decision in learning mode for %v", res.ID)
-		return res.learner(request)
+		log.V(2).Infof("decision in learning mode for %v", res.ID)
+		return res.learner(res.store, res.capacity(), request)
 	}
-	return res.algorithm(request)
+	return res.algorithm(res.store, res.capacity(), request)
 }
 
 // LoadConfig loads cfg into the resource. LoadConfig takes care of

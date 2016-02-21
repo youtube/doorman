@@ -44,9 +44,7 @@ func testAlgorithm(t *testing.T, cases []testCase, capacity float64, algoFunc fu
 	}
 
 	for i, c := range cases {
-		if lease := algo(Request{
-			Capacity:   capacity,
-			Store:      store,
+		if lease := algo(store, capacity, Request{
 			Client:     c.client,
 			Has:        c.has,
 			Wants:      c.wants,
@@ -292,9 +290,7 @@ func TestLeaseLengthAndRefreshInterval(t *testing.T) {
 	})
 
 	now := time.Now()
-	lease := algo(Request{
-		Capacity:   100,
-		Store:      store,
+	lease := algo(store, 100, Request{
 		Client:     "b",
 		Wants:      10,
 		Subclients: 1,
