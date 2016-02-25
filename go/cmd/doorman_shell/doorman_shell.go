@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -30,12 +31,14 @@ import (
 	"github.com/chzyer/readline"
 	log "github.com/golang/glog"
 	"github.com/google/shlex"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/youtube/doorman/go/client/doorman"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
 
 var (
+	port   = flag.Int("port", 0, "port to bind to")
 	server = flag.String("server", "", "Address of the doorman server")
 	caFile = flag.String("ca_file", "", "The file containning the CA root cert file to connect over TLS (otherwise plain TCP will be used)")
 )
@@ -251,6 +254,11 @@ func main() {
 	if *server == "" {
 		fmt.Fprintf(os.Stderr, "--server cannot be empty.\n")
 		os.Exit(1)
+	}
+
+	if *port != 0 {
+		http.Handle("/metrics", prometheus.Handler())
+		go http.ListenAndServe(fmt.Sprintf(":%v", *port), nil)
 	}
 
 	var opts []grpc.DialOption
