@@ -14,12 +14,7 @@
 
 package doorman
 
-import (
-	"flag"
-	"time"
-)
-
-var cleaningInterval = flag.Duration("leasestore-cleanup-interval", 30*time.Second, "Cleaning interval of the lease store")
+import "time"
 
 // Lease represents a lease on capacity for some resource for some client.
 type Lease struct {
