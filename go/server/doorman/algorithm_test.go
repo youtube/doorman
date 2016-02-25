@@ -127,6 +127,9 @@ func TestFairShare(t *testing.T) {
 			subclients: 1,
 		},
 	}, 120, FairShare, true, true)
+}
+
+func TestFairShareLowerExtra(t *testing.T) {
 	testAlgorithm(t, []testCase{
 		{
 			client:     "c0",
@@ -147,6 +150,7 @@ func TestFairShare(t *testing.T) {
 			subclients: 1,
 		},
 	}, 120, FairShare, true, true)
+
 }
 
 func TestFairShareWithMultipleSubclients(t *testing.T) {

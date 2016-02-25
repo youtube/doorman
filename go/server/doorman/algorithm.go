@@ -15,18 +15,12 @@
 package doorman
 
 import (
-	"container/list"
 	"time"
+
+	log "github.com/golang/glog"
 
 	pb "github.com/youtube/doorman/proto/doorman"
 )
-
-// epsilon is the smallest amount of capacity that the algorithms need
-// to worry about. An algorithm might short circuit its processing if
-// there is less than epislon to divide or give out. This value exists
-// for optimisation purposes but also to prevent certain pathological
-// cases because of imprecision in float64 math.
-const epsilon = 1e-6
 
 // Request specifies a requested capacity lease that an Algorithm may
 // grant.
@@ -91,150 +85,123 @@ func Static(config *pb.Algorithm) Algorithm {
 
 // FairShare assigns to each client a "fair" share of the available
 // capacity. The definition of "fair" is as follows: In case the total
-// wants is below the total available capacity, everyone gets what they want.
-// If however the total wants is higher than the total available capacity
-// everyone is guaranteed their equal share of the capacity. Any capacity
-// left by clients who ask for less than their equal share is distributed
-// to clients who ask for more than their equal share in a way so that
-// available capacity is partitioned in equal parts in an iterative way.
+// wants is below the total available capacity, everyone gets what
+// they want.  If however the total wants is higher than the total
+// available capacity everyone is guaranteed their equal share of the
+// capacity. Any capacity left by clients who ask for less than their
+// equal share is distributed to clients who ask for more than their
+// equal share in a way so that available capacity is partitioned in
+// equal parts in an iterative way.
 func FairShare(config *pb.Algorithm) Algorithm {
 	length, interval := getAlgorithmParams(config)
 
 	return func(store LeaseStore, capacity float64, r Request) Lease {
-		var (
-			count = store.Count()
-			old   = store.Get(r.Client)
-		)
+		// Get the lease for this client in the store. If it's not
+		// there, that's fine, we will get the zero lease (which works
+		// for the calculations that come next).
+		old := store.Get(r.Client)
 
-		// If this is a new client, we adjust the count.
-		if !store.HasClient(r.Client) {
-			count += r.Subclients
+		// A sanity check: what the client thinks it has should match
+		// what the server thinks it has. This is not a problem for
+		// now, as the server will depend on its own version, but it
+		// may be a sign of problems with a client implementation, so it's better to log it.
+		if r.Has != old.Has {
+			log.Errorf("client %v is confused: says it has %v, was assigned %v.", r.Client, r.Has, old.Has)
 		}
 
-		// This is the equal share that every subclient should get.
+		// Find the number of subclients that we know of. Note that
+		// the number of sublclients for this request's client may
+		// have changed, so we have to take it in account.
+		count := store.Count() - old.Subclients + r.Subclients
+
+		// Let's find see how much capacity is actually available. We
+		// can count into that the capacity the client has been
+		// assigned.
+		available := capacity - store.SumHas() + old.Has
+
+		// Amount of capacity that each subclient is entitled to.
 		equalShare := capacity / float64(count)
 
-		// This is the equal share that should be assigned to the current client
-		// based on the number of its subclients.
-		equalSharePerClient := equalShare * float64(r.Subclients)
+		// How much capacity this client's subclients are entitled to.
+		deservedShare := equalShare * float64(r.Subclients)
 
-		// This is the capacity which is currently unused (assuming that
-		// the requesting client has no capacity). It is the maximum
-		// capacity that this run of the algorithm can assign to the
-		// requesting client.
-		unusedCapacity := capacity - store.SumHas() + old.Has
-
-		// If the client wants less than its equal share or
-		// if the sum of what all clients want together is less
-		// than the available capacity we can give this client what
-		// it wants.
-		if r.Wants <= equalSharePerClient || store.SumWants() <= capacity {
-			return store.Assign(r.Client, length, interval,
-				minF(r.Wants, unusedCapacity), r.Wants, r.Subclients)
+		// If the client is asking for less than it deserves, that's
+		// fine with us. We can just give it to it, assuming that
+		// there's enough capacity available.
+		if r.Wants <= deservedShare {
+			return store.Assign(r.Client, length, interval, minF(r.Wants, available), r.Wants, r.Subclients)
 		}
 
-		// Map of what each client will get from this algorithm run.
-		// Ultimately we need only determine what this client gets,
-		// but for the algorithm we need to keep track of what
-		// other clients would be getting as well.
-		gets := make(map[string]float64)
+		// If we reached here, it means that the client wants more
+		// than its fair share. We have to find out the extent to
+		// which we can accomodate it.
 
-		// This list contains all the clients which are still in
-		// the race to get some capacity.
-		clients := list.New()
-		clientsNext := list.New()
+		var (
+			// First round of capacity redistribution. extra is the
+			// capacity left by clients asking for less than their
+			// fair share.
+			extra float64
 
-		// Puts every client in the list to signify that they all
-		// still need capacity.
+			// wantExtra is the number of subclients that are competing
+			// for the extra capacity. We know that the current client is
+			// there.
+			wantExtra = r.Subclients
+
+			// Save all the clients that want extra capacity. We'll
+			// need this list for the second round of extra
+			// distribution.
+			wantExtraClients = make(map[string]Lease)
+		)
+
 		store.Map(func(id string, lease Lease) {
-			clients.PushBack(id)
+			if id == r.Client {
+				return
+			}
+			deserved := float64(lease.Subclients) * equalShare
+			if lease.Wants < deserved {
+				// Wants less than it deserves. Put the unclaimed
+				// capacity in the extra pool
+				extra += deserved - lease.Wants
+			} else if lease.Wants > deserved {
+				// Wants more than it deserves. Add its clients to the
+				// extra contenders.
+				wantExtra += lease.Subclients
+				wantExtraClients[id] = lease
+			}
 		})
 
-		// This is the capacity that can still be divided.
-		availableCapacity := capacity
+		// deservedExtra is the chunk of the extra pool this client is
+		// entitled to.
+		deservedExtra := (extra / float64(wantExtra)) * float64(r.Subclients)
 
-		// The clients list now contains all the clients who still need/want
-		// capacity. We are going to divide the capacity in availableCapacity
-		// in iterations until there is nothing more to divide or until we
-		// completely satisfied the client who is making the request.
-		for availableCapacity > epsilon && gets[r.Client] < r.Wants-epsilon {
-			// Calculate number of subclients for the given clients list.
-			clientsCopy := *clients
-			var subclients int64
-			for e := clientsCopy.Front(); e != nil; e = e.Next() {
-				subclients += store.Subclients(e.Value.(string))
-			}
-
-			// This is the fair share that is available to all subclients
-			// who are still in the race to get capacity.
-			fairShare := availableCapacity / float64(subclients)
-
-			// Not enough capacity to actually worry about. Prevents
-			// an infinite loop.
-			if fairShare < epsilon {
-				break
-			}
-
-			// We now process the list of clients and give a topup to
-			// every client's capacity. That topup is either the fair
-			// share or the capacity still needed to be completely
-			// satisfied (in case the client needs less than the
-			// fair share to reach its need/wants).
-			for e := clients.Front(); e != nil; e = e.Next() {
-				id := e.Value.(string)
-
-				// Determines the wants for this client, which comes
-				// either from the store, or from the request info if it
-				// is the client making the request,
-				var wants float64
-				var subclients int64
-
-				if id == r.Client {
-					wants = r.Wants
-					subclients = r.Subclients
-				} else {
-					wants = store.Get(id).Wants
-					subclients = store.Subclients(id)
-				}
-
-				// stillNeeds is the capacity this client still needs to
-				// be completely satisfied.
-				stillNeeds := wants - gets[id]
-
-				// Tops up the client's capacity.
-				// Every client should receive the resource capacity based on
-				// the number of its subclients.
-				fairSharePerClient := fairShare * float64(subclients)
-				if stillNeeds <= fairSharePerClient {
-					gets[id] += stillNeeds
-					availableCapacity -= stillNeeds
-				} else {
-					gets[id] += fairSharePerClient
-					availableCapacity -= fairSharePerClient
-				}
-
-				// If the client is not yet satisfied we include it in the next
-				// generation of the list. If it is completely satisfied we
-				// don't.
-				if gets[id] < wants {
-					clientsNext.PushBack(id)
-				}
-			}
-
-			// Ready for the next iteration of the loop. Swap the clients with the
-			// clientsNext list.
-			clients, clientsNext = clientsNext, clients
-
-			// Cleans the clientsNext list so that it can be used again.
-			clientsNext.Init()
+		// The client wants some extra, but less than to what it is
+		// entitled.
+		if r.Wants < deservedShare+deservedExtra {
+			return store.Assign(r.Client, length, interval, minF(r.Wants, available), r.Wants, r.Subclients)
 		}
 
-		// Insert the capacity grant into the lease store. We cannot
-		// give out more than the currently unused capacity. If that
-		// is less than what the algorithm calculated this will get
-		// fixed in the next capacity refreshes.
-		return store.Assign(r.Client, length, interval,
-			minF(gets[r.Client], unusedCapacity), r.Wants, r.Subclients)
+		// Second round of extra capacity distribution: some clients
+		// may have asked for more than their fair share, but less
+		// than the chunk of extra that they are entitled to. Let's
+		// redistribute that.
+
+		var (
+			wantExtraExtra = r.Subclients
+			extraExtra     float64
+		)
+		for id, lease := range wantExtraClients {
+			if id == r.Client {
+				continue
+			}
+
+			if lease.Wants < deservedExtra+deservedShare {
+				extraExtra += deservedExtra + deservedShare - lease.Wants
+			} else if lease.Wants > deservedExtra+deservedShare {
+				wantExtraExtra += lease.Subclients
+			}
+		}
+		deservedExtraExtra := (extraExtra / float64(wantExtraExtra)) * float64(r.Subclients)
+		return store.Assign(r.Client, length, interval, minF(deservedShare+deservedExtra+deservedExtraExtra, available), r.Wants, r.Subclients)
 	}
 }
 
@@ -245,7 +212,6 @@ func FairShare(config *pb.Algorithm) Algorithm {
 // equal share proportional to what the client is asking for.
 func ProportionalShare(config *pb.Algorithm) Algorithm {
 	length, interval := getAlgorithmParams(config)
-
 	return func(store LeaseStore, capacity float64, r Request) Lease {
 		var (
 			count = store.Count()
