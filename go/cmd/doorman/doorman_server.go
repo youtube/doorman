@@ -30,6 +30,7 @@ import (
 
 	log "github.com/golang/glog"
 	"github.com/golang/protobuf/proto"
+	"github.com/prometheus/client_golang/prometheus"
 	rpc "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
@@ -223,6 +224,8 @@ func main() {
 	// Redirect form / to /debug/status.
 	http.Handle("/", http.RedirectHandler("/debug/status", http.StatusMovedPermanently))
 	AddServer(dm)
+
+	http.Handle("/metrics", prometheus.Handler())
 
 	go http.ListenAndServe(fmt.Sprintf(":%v", *debugPort), nil)
 

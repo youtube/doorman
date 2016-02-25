@@ -28,6 +28,7 @@ import (
 
 	log "github.com/golang/glog"
 	"github.com/golang/protobuf/proto"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/youtube/doorman/go/connection"
 	"github.com/youtube/doorman/go/server/election"
 	"github.com/youtube/doorman/go/timeutil"
@@ -88,6 +89,37 @@ const (
 	// maxBackoff is the maximum for the exponential backoff.
 	maxBackoff = 1 * time.Minute
 )
+
+var (
+	requestLabels = []string{"method"}
+
+	requests = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "doorman",
+		Subsystem: "server",
+		Name:      "requests",
+		Help:      "Requests sent to a Doorman service.",
+	}, requestLabels)
+
+	requestErrors = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "doorman",
+		Subsystem: "server",
+		Name:      "request_errors",
+		Help:      "Requests sent to a Doorman service that returned an error.",
+	}, requestLabels)
+
+	requestDurations = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: "doorman",
+		Subsystem: "server",
+		Name:      "request_durations",
+		Help:      "Duration of different requests in seconds.",
+	}, requestLabels)
+)
+
+func init() {
+	prometheus.MustRegister(requests)
+	prometheus.MustRegister(requestErrors)
+	prometheus.MustRegister(requestDurations)
+}
 
 // Server represents the state of a doorman server.
 type Server struct {
@@ -580,7 +612,15 @@ func (server *Server) ReleaseCapacity(ctx context.Context, in *pb.ReleaseCapacit
 	out = new(pb.ReleaseCapacityResponse)
 
 	log.V(2).Infof("ReleaseCapacity req: %v", in)
-	defer log.V(2).Infof("ReleaseCapacity res: %v", out)
+	start := time.Now()
+	requests.WithLabelValues("ReleaseCapacity").Inc()
+	defer func() {
+		defer log.V(2).Infof("ReleaseCapacity res: %v", out)
+		if err != nil {
+			requestErrors.WithLabelValues("ReleaseCapacity").Inc()
+			requestDurations.WithLabelValues("ReleaseCapacity").Observe(time.Since(start).Seconds())
+		}
+	}()
 
 	// If we are not the master we tell the client who we think the master
 	// is and we return. There are some subtleties around this: The presence
@@ -634,7 +674,16 @@ func (server *Server) GetCapacity(ctx context.Context, in *pb.GetCapacityRequest
 	out = new(pb.GetCapacityResponse)
 
 	log.V(2).Infof("GetCapacity req: %v", in)
-	defer log.V(2).Infof("GetCapacity res: %v", out)
+
+	start := time.Now()
+	requests.WithLabelValues("GetCapacity").Inc()
+	defer func() {
+		defer log.V(2).Infof("GetCapacity res: %v", out)
+		if err != nil {
+			requestErrors.WithLabelValues("GetCapacity").Inc()
+			requestDurations.WithLabelValues("GetCapacity").Observe(time.Since(start).Seconds())
+		}
+	}()
 
 	// If we are not the master, we redirect the client.
 	if !server.IsMaster() {
