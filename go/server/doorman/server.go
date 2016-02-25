@@ -615,10 +615,11 @@ func (server *Server) ReleaseCapacity(ctx context.Context, in *pb.ReleaseCapacit
 	start := time.Now()
 	requests.WithLabelValues("ReleaseCapacity").Inc()
 	defer func() {
-		defer log.V(2).Infof("ReleaseCapacity res: %v", out)
+		log.V(2).Infof("ReleaseCapacity res: %v", out)
+		requestDurations.WithLabelValues("ReleaseCapacity").Observe(time.Since(start).Seconds())
 		if err != nil {
 			requestErrors.WithLabelValues("ReleaseCapacity").Inc()
-			requestDurations.WithLabelValues("ReleaseCapacity").Observe(time.Since(start).Seconds())
+
 		}
 	}()
 
@@ -678,10 +679,10 @@ func (server *Server) GetCapacity(ctx context.Context, in *pb.GetCapacityRequest
 	start := time.Now()
 	requests.WithLabelValues("GetCapacity").Inc()
 	defer func() {
-		defer log.V(2).Infof("GetCapacity res: %v", out)
+		log.V(2).Infof("GetCapacity res: %v", out)
+		requestDurations.WithLabelValues("GetCapacity").Observe(time.Since(start).Seconds())
 		if err != nil {
 			requestErrors.WithLabelValues("GetCapacity").Inc()
-			requestDurations.WithLabelValues("GetCapacity").Observe(time.Since(start).Seconds())
 		}
 	}()
 
