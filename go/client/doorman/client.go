@@ -31,6 +31,7 @@ import (
 
 	log "github.com/golang/glog"
 	"github.com/golang/protobuf/proto"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/youtube/doorman/go/connection"
 	"github.com/youtube/doorman/go/timeutil"
 	"golang.org/x/net/context"
@@ -64,6 +65,37 @@ var (
 	// ErrInvalidWants indicates that wants must be a postive number > 0
 	ErrInvalidWants = errors.New("wants must be > 0.0")
 )
+
+var (
+	requestLabels = []string{"server", "method"}
+
+	requests = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "doorman",
+		Subsystem: "client",
+		Name:      "requests",
+		Help:      "Requests sent to a Doorman service.",
+	}, requestLabels)
+
+	requestErrors = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "doorman",
+		Subsystem: "client",
+		Name:      "request_errors",
+		Help:      "Requests sent to a Doorman service that returned an error.",
+	}, requestLabels)
+
+	requestDurations = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: "doorman",
+		Subsystem: "client",
+		Name:      "request_durations",
+		Help:      "Duration of different requests in seconds.",
+	}, requestLabels)
+)
+
+func init() {
+	prometheus.MustRegister(requests)
+	prometheus.MustRegister(requestErrors)
+	prometheus.MustRegister(requestDurations)
+}
 
 // NOTE: We're wrapping connection package's functions and types here in the client,
 // because we do not want our users to be aware of the internal connection package.
@@ -405,12 +437,17 @@ func (client *Client) Close() {
 func (client *Client) releaseCapacity(in *pb.ReleaseCapacityRequest) (*pb.ReleaseCapacityResponse, error) {
 	// context.TODO(ryszard): Plumb a context through.
 	out, err := client.conn.ExecuteRPC(func() (connection.HasMastership, error) {
+		start := time.Now()
+		requests.WithLabelValues(client.conn.String(), "ReleaseCapacity").Inc()
+		defer requestDurations.WithLabelValues(client.conn.String(), "ReleaseCapacity").Observe(time.Since(start).Seconds())
+
 		return client.conn.Stub.ReleaseCapacity(context.TODO(), in)
 
 	})
 
 	// Returns an error if we could not execute the RPC.
 	if err != nil {
+		requestErrors.WithLabelValues(client.conn.String(), "ReleaseCapacity").Inc()
 		return nil, err
 	}
 
@@ -423,12 +460,19 @@ func (client *Client) releaseCapacity(in *pb.ReleaseCapacityRequest) (*pb.Releas
 func (client *Client) getCapacity(in *pb.GetCapacityRequest) (*pb.GetCapacityResponse, error) {
 	// context.TODO(ryszard): Plumb a context through.
 	out, err := client.conn.ExecuteRPC(func() (connection.HasMastership, error) {
+		start := time.Now()
+		requests.WithLabelValues(client.conn.String(), "GetCapacity").Inc()
+		defer func() {
+			log.Infof("%v %v", time.Since(start).Seconds(), time.Since(start))
+			requestDurations.WithLabelValues(client.conn.String(), "GetCapacity").Observe(time.Since(start).Seconds())
+		}()
 		return client.conn.Stub.GetCapacity(context.TODO(), in)
 
 	})
 
 	// Returns an error if we could not execute the RPC.
 	if err != nil {
+		requestErrors.WithLabelValues(client.conn.String(), "GetCapacity").Inc()
 		return nil, err
 	}
 

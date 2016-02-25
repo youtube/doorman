@@ -46,6 +46,10 @@ type Connection struct {
 	Opts          *Options
 }
 
+func (connection *Connection) String() string {
+	return connection.currentMaster
+}
+
 // New creates a new Connection with the given server address.
 func New(addr string, options ...Option) (*Connection, error) {
 	connection := &Connection{
