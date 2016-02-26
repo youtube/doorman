@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: doorman-client-proportional
+spec:
+  replicas: 10
+  selector:
+    app: doorman-client
+  template:
+    metadata:
+      name: doorman-client-proportional
+      labels:
+        app: doorman-client
+    spec:
+      containers:
+        - name: doorman-client-proportional
+          resources:
+            limits:
+              cpu: 10m
+          image: gcr.io/google.com/doorman/doorman-client:v0.1.7
+          command: 
+            - client
+            - -port=80
+            - -count=50
+            - -initial_capacity=15
+            - -min_capacity=5
+            - -max_capacity=2000
+            - -increase_chance=0.1
+            - -decrease_chance=0.05
+            - -step=5
+            - -resource=proportional
+            - -addr=$(DOORMAN_SERVICE_HOST):$(DOORMAN_SERVICE_PORT_GRPC)
+            - -target=$(TARGET_SERVICE_HOST):$(TARGET_SERVICE_PORT_GRPC)
+            - -vmodule=doorman_client=2
+            - --logtostderr
+          ports:
+            - containerPort: 80
+              name: http

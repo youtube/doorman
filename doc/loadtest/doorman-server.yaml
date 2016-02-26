@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: doorman-server
+spec:
+  replicas: 1
+  selector:
+    app: doorman-server
+  template:
+    metadata:
+      name: doorman-server
+      labels:
+        app: doorman-server
+
+    spec:
+      containers:
+        - name: doorman-server
+          image: gcr.io/google.com/doorman/doorman-server:v0.1.7
+          command: ["doorman", "-logtostderr", "-port=3667", "-debug_port=3668", "-config=./config.prototext"]
+          resources:
+            limits:
+              cpu: 0.8
+          ports:
+            - containerPort: 3667
+              name: grpc
+            - containerPort: 3668
+              name: http
