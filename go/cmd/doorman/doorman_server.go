@@ -227,6 +227,10 @@ func main() {
 
 	http.Handle("/metrics", prometheus.Handler())
 
+	if err := prometheus.Register(doorman.NewCollector(dm)); err != nil {
+		log.Exitf("prometheus.Register: %v", err)
+	}
+
 	go http.ListenAndServe(fmt.Sprintf(":%v", *debugPort), nil)
 
 	// Waits for the server to get its initial configuration. This guarantees that

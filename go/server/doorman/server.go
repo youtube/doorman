@@ -524,10 +524,7 @@ func NewIntermediate(ctx context.Context, id string, addr string, leader electio
 	return server, nil
 }
 
-// New returns a new unconfigured server. It will use id and
-// masterLock (an etcd path) in a master election. masterDelay is the
-// amount of time in which a deposed master can try to reacquire
-// mastership.
+// New returns a new unconfigured server.
 func New(ctx context.Context, id string, leader election.Election, opts ...connection.Option) (*Server, error) {
 	return NewIntermediate(ctx, id, "", leader, opts...)
 }
