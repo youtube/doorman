@@ -107,6 +107,7 @@ type leaseStoreImpl struct {
 	leases   map[string]Lease
 	sumWants float64
 	sumHas   float64
+	count    int64
 }
 
 // New returns a fresh LeaseStore implementation.
@@ -118,27 +119,15 @@ func NewLeaseStore(id string) LeaseStore {
 }
 
 func (store *leaseStoreImpl) Count() int64 {
-	var subclients int64
-	for _, lease := range store.leases {
-		subclients += lease.Subclients
-	}
-	return subclients
+	return store.count
 }
 
 func (store *leaseStoreImpl) SumWants() float64 {
 	return store.sumWants
 }
 
-func (store *leaseStoreImpl) modifySumWants(diff float64) {
-	store.sumWants += diff
-}
-
 func (store *leaseStoreImpl) SumHas() float64 {
 	return store.sumHas
-}
-
-func (store *leaseStoreImpl) modifySumHas(diff float64) {
-	store.sumHas += diff
 }
 
 func (store *leaseStoreImpl) HasClient(client string) bool {
@@ -155,16 +144,18 @@ func (store *leaseStoreImpl) Release(client string) {
 	if !ok {
 		return
 	}
-	store.modifySumWants(-lease.Wants)
-	store.modifySumHas(-lease.Has)
+	store.sumWants -= lease.Wants
+	store.sumHas -= lease.Has
+	store.count -= lease.Subclients
 	delete(store.leases, client)
 }
 
 func (store *leaseStoreImpl) Assign(client string, leaseLength, refreshInterval time.Duration, has, wants float64, subclients int64) Lease {
 	lease := store.leases[client]
 
-	store.modifySumHas(has - lease.Has)
-	store.modifySumWants(wants - lease.Wants)
+	store.sumHas += has - lease.Has
+	store.sumWants += wants - lease.Wants
+	store.count += subclients - lease.Subclients
 
 	lease.Has, lease.Wants = has, wants
 	lease.Expiry = time.Now().Add(leaseLength)
