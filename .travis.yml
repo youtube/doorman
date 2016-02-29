@@ -4,6 +4,6 @@ go:
   - 1.5
 
 script: go test -race ./go/...
-
+install: GO15VENDOREXPERIMENT=1 go get -t -v ./go/...
 env:
   - GO15VENDOREXPERIMENT=1
