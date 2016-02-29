@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: target
+spec:
+  replicas: 1
+  selector:
+    app: target
+  template:
+    metadata:
+      name: target
+      labels:
+        app: target
+    spec:
+      containers:
+        - name: target
+          # resources:
+          #   limits:
+          #     cpu: 10m
+          image: gcr.io/google.com/doorman/target:v0.1
+          command: 
+            - target
+            - -debug_port=80
+            - -port=81
+            - --logtostderr
+          ports:
+            - containerPort: 80
+              name: http            
+            - containerPort: 81
+              name: grpc
