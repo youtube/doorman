@@ -56,6 +56,7 @@ Doorman requires the clients to inform it of the desired capacity (the so-called
 ### Next steps
 - Read the [tutorial](doc/simplecluster).
 - Read more about available [algorithms](doc/algorithms.md).
+- Read a [Kubernetes deployment tutorial](doc/loadtest).
 - Read about Doorman's [configuration](doc/configuration.md).
 - Read the in-depth [design doc](doc/design.md).
 - Read the [client documentation](https://godoc.org/github.com/youtube/doorman/go/client/doorman).
