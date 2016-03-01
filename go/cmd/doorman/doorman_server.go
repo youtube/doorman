@@ -155,7 +155,7 @@ func main() {
 		masterElection = election.Trivial()
 	}
 
-	dm, err := doorman.NewIntermediate(context.Background(), getServerID(*port), *parent, masterElection,
+	dm, err := doorman.New(context.Background(), getServerID(*port), *parent, masterElection,
 		connection.MinimumRefreshInterval(*minimumRefreshInterval),
 		connection.DialOpts(
 			rpc.WithTimeout(*rpcDialTimeout)))
@@ -226,10 +226,6 @@ func main() {
 	AddServer(dm)
 
 	http.Handle("/metrics", prometheus.Handler())
-
-	if err := prometheus.Register(doorman.NewCollector(dm)); err != nil {
-		log.Exitf("prometheus.Register: %v", err)
-	}
 
 	go http.ListenAndServe(fmt.Sprintf(":%v", *debugPort), nil)
 

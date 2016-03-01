@@ -148,6 +148,14 @@ type Server struct {
 
 	// quit is used to notify that the server is to be closed.
 	quit chan bool
+
+	// descs are metrics descriptions for use when the server's state
+	// is collected by Prometheus.
+	descs struct {
+		has        *prometheus.Desc
+		wants      *prometheus.Desc
+		subclients *prometheus.Desc
+	}
 }
 
 type updater func(server *Server, retryNumber int) (time.Duration, int)
@@ -473,6 +481,36 @@ func (server *Server) triggerElection(ctx context.Context) error {
 	return nil
 }
 
+// New returns a new unconfigured server. parentAddr is the address of
+// a parent, pass the empty string to create a root server. This
+// function should be called only once, as it registers metrics.
+func New(ctx context.Context, id string, parentAddr string, leader election.Election, opts ...connection.Option) (*Server, error) {
+	s, err := NewIntermediate(ctx, id, parentAddr, leader, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	return s, prometheus.Register(s)
+}
+
+// Describe implements prometheus.Collector.
+func (server *Server) Describe(ch chan<- *prometheus.Desc) {
+	ch <- server.descs.has
+	ch <- server.descs.wants
+	ch <- server.descs.subclients
+}
+
+// Collect implements prometheus.Collector.
+func (server *Server) Collect(ch chan<- prometheus.Metric) {
+	status := server.Status()
+
+	for id, res := range status.Resources {
+		ch <- prometheus.MustNewConstMetric(server.descs.has, prometheus.GaugeValue, res.SumHas, id)
+		ch <- prometheus.MustNewConstMetric(server.descs.wants, prometheus.GaugeValue, res.SumWants, id)
+		ch <- prometheus.MustNewConstMetric(server.descs.subclients, prometheus.GaugeValue, float64(res.Count), id)
+	}
+}
+
 // NewIntermediate creates a server connected to the lower level server.
 func NewIntermediate(ctx context.Context, id string, addr string, leader election.Election, opts ...connection.Option) (*Server, error) {
 	var (
@@ -506,6 +544,28 @@ func NewIntermediate(ctx context.Context, id string, addr string, leader electio
 		quit:           make(chan bool),
 	}
 
+	const (
+		namespace = "doorman"
+		subsystem = "server"
+	)
+
+	labelNames := []string{"resource"}
+	server.descs.has = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, subsystem, "has"),
+		"All capacity assigned to clients for a resource.",
+		labelNames, nil,
+	)
+	server.descs.wants = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, subsystem, "wants"),
+		"All capacity requested by clients for a resource.",
+		labelNames, nil,
+	)
+	server.descs.subclients = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, subsystem, "subclients"),
+		"Number of clients requesting this resource.",
+		labelNames, nil,
+	)
+
 	// For an intermediate server load the default config for "*"
 	// resource.  As for root server, this config will be loaded
 	// from some external source..
@@ -522,11 +582,6 @@ func NewIntermediate(ctx context.Context, id string, addr string, leader electio
 	go server.run()
 
 	return server, nil
-}
-
-// New returns a new unconfigured server.
-func New(ctx context.Context, id string, leader election.Election, opts ...connection.Option) (*Server, error) {
-	return NewIntermediate(ctx, id, "", leader, opts...)
 }
 
 // run is the server's main loop. It takes care of requesting new resources,
