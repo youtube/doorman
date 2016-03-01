@@ -211,10 +211,11 @@ You will have to replace `google.com/doorman` with your project name, of course,
 ## Populating the cluster
 
 ### Doorman
-Now, time for the fun part: putting our containers into the cloud! First we'll create a replication controller for the doorman server. We want only one replica, but we need it to be restarted in case something happens. Please take a look at its code in [doorman-server.yaml](doorman-server.yaml). 
+Now, time for the fun part: putting our containers into the cloud! First we'll create a replication controller for the doorman server. We want only one replica, but we need it to be restarted in case something happens. Second, we'll create a service, that will make our server discoverable for the clients. Please take a look at the code in [doorman-server.yaml](k8s/doorman-server.yaml). 
 
 ```console
-$ kubectl create -f doc/loadtest/doorman-server.yaml
+$ kubectl create -f doc/loadtest/k8s/doorman-server.yaml
+service "doorman" created
 replicationcontroller "doorman-server" created
 ```
 
@@ -253,17 +254,11 @@ to forward our 3668 port to the same container's port. Now we can go to http://l
 
 ![doorman's /debug/status](empty-debug-status.png)
 
-Before we forget about it, let's also create a service, that will make our server discoverable for the clients:
-
-```console
-$ kubectl create -f doc/loadtest/doorman-server-service.yaml
-```
-
 ### Prometheus
 Let's not forget about 
 
 ```console
-$ kubectl create -f doc/loadtest/prometheus.yaml
+$ kubectl create -f doc/loadtest/k8s/prometheus.yaml
 ```
 and quickly verify that it's running. Forward its port:
 
@@ -277,10 +272,9 @@ And go to http://localhost:9090/graph to verify it's running.
 
 Now, it's time for the target.
 ```console
-$ kubectl create -f doc/loadtest/target.yaml
-replicationcontroller "target" created
-$ kubectl create -f doc/loadtest/target-service.yaml
+$ kubectl create -f doc/loadtest/k8s/target.yaml
 service "target" created
+replicationcontroller "target" created
 ```
 
 Let's verify it's running:
@@ -296,8 +290,9 @@ target-4ivl7   1/1       Running   0          1m
 Now, the key, final element of our puzzle: the client. Let's bring it up:
 
 ```console
-$ kubectl create -f doc/loadtest/doorman-client.yaml
-$ kubectl create -f doc/loadtest/doorman-client-service.yaml
+$ kubectl create -f doc/loadtest/k8s/doorman-client.yaml
+service "doorman-client" created
+replicationcontroller "doorman-client" created
 ```
 
 This creates 10 replicas of `doorman-client`. Each replica is running the following command line:
@@ -371,4 +366,4 @@ Experiment with different capacity distribution algorithms. Edit [`config.protex
 
 ### High Availability
 
-Make the Doorman server highly available. Add an etcd instance (or cluster) to the Kubernetes cluster, increase the number of replicas in  [doorman-server.yaml](doorman-server.yaml), and configure them to do a leader election. (Hint: Use the `-etcd_endpoints` and `-master_election_lock` flags.)
+Make the Doorman server highly available. Add an etcd instance (or cluster) to the Kubernetes cluster, increase the number of replicas in  [doorman-server.yaml](k8s/doorman-server.yaml), and configure them to do a leader election. (Hint: Use the `-etcd_endpoints` and `-master_election_lock` flags.)
