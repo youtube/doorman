@@ -17,13 +17,10 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"golang.org/x/net/context"
@@ -34,6 +31,7 @@ import (
 	rpc "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	"github.com/youtube/doorman/go/configuration"
 	"github.com/youtube/doorman/go/connection"
 	"github.com/youtube/doorman/go/server/doorman"
 	"github.com/youtube/doorman/go/server/election"
@@ -55,7 +53,7 @@ var (
 	serverRole = flag.String("server_role", "root", "Role of this server in the server tree")
 	parent     = flag.String("parent", "", "Address of the parent server which this server connects to")
 	hostname   = flag.String("hostname", "", "Use this as the hostname (if empty, use whatever the kernel reports")
-	config     = flag.String("config", "", "file to load the config from (text protobufs)")
+	config     = flag.String("config", "", "source to load the config from (text protobufs)")
 
 	rpcDialTimeout = flag.Duration("doorman_rpc_dial_timeout", 5*time.Second, "timeout to use for connecting to the doorman server")
 
@@ -142,10 +140,12 @@ func main() {
 	if *config == "" {
 		log.Exit("--config cannot be empty")
 	}
-
-	var masterElection election.Election
+	var (
+		etcdEndpointsSlice = strings.Split(*etcdEndpoints, ",")
+		masterElection     election.Election
+	)
 	if *masterElectionLock != "" {
-		etcdEndpointsSlice := strings.Split(*etcdEndpoints, ",")
+
 		if len(etcdEndpointsSlice) == 1 && etcdEndpointsSlice[0] == "" {
 			log.Exit("-etcd_endpoints cannot be empty if -master_election_lock is provided")
 		}
@@ -180,42 +180,39 @@ func main() {
 		log.Exit("-config cannot be empty")
 	}
 
-	data, err := ioutil.ReadFile(*config)
-	if err != nil {
-		log.Exitf("cannot read config file: %v", err)
+	var cfg configuration.Source
+	kind, path := configuration.ParseSource(*config)
+	switch {
+	case kind == "file":
+		cfg = configuration.LocalFile(path)
+	case kind == "etcd":
+		if len(etcdEndpointsSlice) == 1 && etcdEndpointsSlice[0] == "" {
+			log.Exit("-etcd_endpoints cannot be empty if a config source etcd is provided")
+		}
+		cfg = configuration.Etcd(path, etcdEndpointsSlice)
+	default:
+		panic("unreachable")
 	}
 
-	cfg := new(pb.ResourceRepository)
-	if err := proto.UnmarshalText(string(data), cfg); err != nil {
-		log.Exitf("cannot load config: %v", err)
-	}
-
-	if err := dm.LoadConfig(context.Background(), cfg, map[string]*time.Time{}); err != nil {
-		log.Exitf("dm.LoadConfig: %v", err)
-	}
-
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, syscall.SIGHUP)
-
+	// Try to load the background. If there's a problem with loading
+	// the server for the first time, the server will keep running,
+	// but will not serve traffic.
 	go func() {
-		for range c {
-			log.Infof("Received SIGHUP, attempting to reload configuration from %v.", *config)
-			data, err := ioutil.ReadFile(*config)
+		for {
+			data, err := cfg(context.Background())
 			if err != nil {
-				log.Errorf("cannot read config file: %v", err)
+				log.Errorf("cannot load config data: %v", err)
 				continue
 			}
-
 			cfg := new(pb.ResourceRepository)
 			if err := proto.UnmarshalText(string(data), cfg); err != nil {
-				log.Errorf("cannot load config: %v", err)
+				log.Errorf("cannot unmarshal config data: %q", data)
 				continue
 			}
 
 			if err := dm.LoadConfig(context.Background(), cfg, map[string]*time.Time{}); err != nil {
-				log.Errorf("dm.LoadConfig: %v", err)
+				log.Errorf("cannot load config: %v", err)
 			}
-			log.Infof("Reloaded config from %v", *config)
 		}
 	}()
 
