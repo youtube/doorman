@@ -33,6 +33,7 @@ import (
 
 	"github.com/youtube/doorman/go/configuration"
 	"github.com/youtube/doorman/go/connection"
+	"github.com/youtube/doorman/go/flagenv"
 	"github.com/youtube/doorman/go/server/doorman"
 	"github.com/youtube/doorman/go/server/election"
 	"github.com/youtube/doorman/go/status"
@@ -136,6 +137,9 @@ func getServerID(port int) string {
 
 func main() {
 	flag.Parse()
+	if err := flagenv.Populate(flag.CommandLine, "DOORMAN"); err != nil {
+		log.Exit(err)
+	}
 
 	if *config == "" {
 		log.Exit("--config cannot be empty")
