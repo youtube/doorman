@@ -23,7 +23,8 @@ type Config struct {
 	// readline will persist historys to file where HistoryFile specified
 	HistoryFile string
 	// specify the max length of historys, it's 500 by default, set it to -1 to disable history
-	HistoryLimit int
+	HistoryLimit           int
+	DisableAutoSaveHistory bool
 
 	// AutoCompleter will called once user press TAB
 	AutoComplete AutoCompleter
@@ -44,10 +45,24 @@ type Config struct {
 
 	MaskRune rune
 
+	UniqueEditLine bool
+
+	// force use interactive even stdout is not a tty
+	StdinFd             int
+	StdoutFd            int
+	ForceUseInteractive bool
+
 	// private fields
 	inited    bool
 	opHistory *opHistory
 	opSearch  *opSearch
+}
+
+func (c *Config) useInteractive() bool {
+	if c.ForceUseInteractive {
+		return true
+	}
+	return IsTerminal(c.StdoutFd) && IsTerminal(c.StdinFd)
 }
 
 func (c *Config) Init() error {
@@ -63,6 +78,12 @@ func (c *Config) Init() error {
 	}
 	if c.Stderr == nil {
 		c.Stderr = Stderr
+	}
+	if c.StdinFd == 0 {
+		c.StdinFd = StdinFd
+	}
+	if c.StdoutFd == 0 {
+		c.StdoutFd = StdoutFd
 	}
 	if c.HistoryLimit == 0 {
 		c.HistoryLimit = 500
@@ -80,6 +101,12 @@ func (c *Config) Init() error {
 	}
 
 	return nil
+}
+
+func (c Config) Clone() *Config {
+	c.opHistory = nil
+	c.opSearch = nil
+	return &c
 }
 
 func (c *Config) SetListener(f func(line []rune, pos int, key rune) (newLine []rune, newPos int, ok bool)) {
@@ -152,8 +179,13 @@ func (i *Instance) ReadPassword(prompt string) ([]byte, error) {
 	return i.Operation.Password(prompt)
 }
 
+// err is one of (nil, io.EOF, readline.ErrInterrupt)
 func (i *Instance) Readline() (string, error) {
 	return i.Operation.String()
+}
+
+func (i *Instance) SaveHistory(content string) error {
+	return i.Operation.SaveHistory(content)
 }
 
 // same as readline

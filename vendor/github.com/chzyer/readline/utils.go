@@ -10,6 +10,7 @@ import (
 
 var (
 	StdinFd   = int(uintptr(syscall.Stdin))
+	StdoutFd  = int(uintptr(syscall.Stdout))
 	isWindows = false
 )
 
@@ -86,8 +87,8 @@ func escapeKey(r rune) rune {
 }
 
 // calculate how many lines for N character
-func LineCount(w int) int {
-	screenWidth := getWidth()
+func LineCount(stdoutFd int, w int) int {
+	screenWidth := getWidth(stdoutFd)
 	r := w / screenWidth
 	if w%screenWidth != 0 {
 		r++

@@ -20,7 +20,7 @@ type Operation struct {
 	errchan chan error
 	w       io.Writer
 
-	*opHistory
+	history *opHistory
 	*opSearch
 	*opCompleter
 	*opPassword
@@ -58,7 +58,7 @@ func (w *wrapWriter) Write(b []byte) (int, error) {
 func NewOperation(t *Terminal, cfg *Config) *Operation {
 	op := &Operation{
 		t:       t,
-		buf:     NewRuneBuffer(t, cfg.Prompt, cfg.MaskRune),
+		buf:     NewRuneBuffer(t, cfg.Prompt, cfg.MaskRune, cfg),
 		outchan: make(chan []rune),
 		errchan: make(chan error),
 	}
@@ -84,6 +84,13 @@ func (o *Operation) ioloop() {
 		keepInSearchMode := false
 		keepInCompleteMode := false
 		r := o.t.ReadRune()
+		if r == 0 { // io.EOF
+			o.buf.Clean()
+			select {
+			case o.errchan <- io.EOF:
+			}
+			break
+		}
 		isUpdateHistory := true
 
 		if o.IsInCompleteSelectMode() {
@@ -95,7 +102,7 @@ func (o *Operation) ioloop() {
 			o.buf.Refresh(nil)
 			switch r {
 			case CharEnter, CharCtrlJ:
-				o.UpdateHistory(o.buf.Runes(), false)
+				o.history.Update(o.buf.Runes(), false)
 				fallthrough
 			case CharInterrupt:
 				o.t.KickRead()
@@ -174,24 +181,35 @@ func (o *Operation) ioloop() {
 				o.ExitSearchMode(false)
 			}
 			o.buf.MoveToLineEnd()
-			o.buf.WriteRune('\n')
-			data := o.buf.Reset()
-			data = data[:len(data)-1] // trim \n
+			var data []rune
+			if !o.cfg.UniqueEditLine {
+				o.buf.WriteRune('\n')
+				data = o.buf.Reset()
+				data = data[:len(data)-1] // trim \n
+			} else {
+				o.buf.Clean()
+				data = o.buf.Reset()
+			}
 			o.outchan <- data
-			o.NewHistory(data)
+			if !o.cfg.DisableAutoSaveHistory {
+				// ignore IO error
+				_ = o.history.New(data)
+			} else {
+				isUpdateHistory = false
+			}
 		case CharBackward:
 			o.buf.MoveBackward()
 		case CharForward:
 			o.buf.MoveForward()
 		case CharPrev:
-			buf := o.PrevHistory()
+			buf := o.history.Prev()
 			if buf != nil {
 				o.buf.Set(buf)
 			} else {
 				o.t.Bell()
 			}
 		case CharNext:
-			buf, ok := o.NextHistory()
+			buf, ok := o.history.Next()
 			if ok {
 				o.buf.Set(buf)
 			} else {
@@ -210,7 +228,7 @@ func (o *Operation) ioloop() {
 			o.buf.WriteString(o.cfg.EOFPrompt + "\n")
 			o.buf.Reset()
 			isUpdateHistory = false
-			o.RevertHistory()
+			o.history.Revert()
 			o.errchan <- io.EOF
 		case CharInterrupt:
 			if o.IsSearchMode() {
@@ -229,7 +247,7 @@ func (o *Operation) ioloop() {
 			o.buf.WriteString(o.cfg.InterruptPrompt + "\n")
 			o.buf.Reset()
 			isUpdateHistory = false
-			o.RevertHistory()
+			o.history.Revert()
 			o.errchan <- ErrInterrupt
 		default:
 			if o.IsSearchMode() {
@@ -264,7 +282,8 @@ func (o *Operation) ioloop() {
 			}
 		}
 		if isUpdateHistory && !o.IsSearchMode() {
-			o.UpdateHistory(o.buf.Runes(), false)
+			// it will cause null history
+			o.history.Update(o.buf.Runes(), false)
 		}
 	}
 }
@@ -347,15 +366,15 @@ func (o *Operation) Slice() ([]byte, error) {
 }
 
 func (o *Operation) Close() {
-	o.opHistory.CloseHistory()
+	o.history.Close()
 }
 
 func (o *Operation) SetHistoryPath(path string) {
-	if o.opHistory != nil {
-		o.opHistory.CloseHistory()
+	if o.history != nil {
+		o.history.Close()
 	}
 	o.cfg.HistoryFile = path
-	o.opHistory = newOpHistory(o.cfg)
+	o.history = newOpHistory(o.cfg)
 }
 
 func (o *Operation) IsNormalMode() bool {
@@ -373,20 +392,31 @@ func (op *Operation) SetConfig(cfg *Config) (*Config, error) {
 	op.cfg = cfg
 	op.SetPrompt(cfg.Prompt)
 	op.SetMaskRune(cfg.MaskRune)
+	op.buf.SetConfig(cfg)
 
 	if cfg.opHistory == nil {
 		op.SetHistoryPath(cfg.HistoryFile)
-		cfg.opHistory = op.opHistory
-		cfg.opSearch = newOpSearch(op.buf.w, op.buf, op.opHistory)
+		cfg.opHistory = op.history
+		cfg.opSearch = newOpSearch(op.buf.w, op.buf, op.history, cfg)
 	}
-	op.opHistory = cfg.opHistory
+	op.history = cfg.opHistory
 
 	// SetHistoryPath will close opHistory which already exists
 	// so if we use it next time, we need to reopen it by `InitHistory()`
-	op.opHistory.InitHistory()
+	op.history.Init()
+
+	if op.cfg.AutoComplete != nil {
+		op.opCompleter = newOpCompleter(op.buf.w, op)
+	}
 
 	op.opSearch = cfg.opSearch
 	return old, nil
+}
+
+// if err is not nil, it just mean it fail to write to file
+// other things goes fine.
+func (o *Operation) SaveHistory(content string) error {
+	return o.history.New([]rune(content))
 }
 
 func (o *Operation) Refresh() {

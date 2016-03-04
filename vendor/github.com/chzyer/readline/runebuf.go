@@ -21,6 +21,8 @@ type RuneBuffer struct {
 	mask   rune
 
 	cleanInScreen bool
+	interactive   bool
+	cfg           *Config
 
 	bck *runeBufferBck
 }
@@ -39,13 +41,20 @@ func (r *RuneBuffer) Restore() {
 	})
 }
 
-func NewRuneBuffer(w io.Writer, prompt string, mask rune) *RuneBuffer {
+func NewRuneBuffer(w io.Writer, prompt string, mask rune, cfg *Config) *RuneBuffer {
 	rb := &RuneBuffer{
-		w:    w,
-		mask: mask,
+		w:           w,
+		mask:        mask,
+		interactive: cfg.useInteractive(),
+		cfg:         cfg,
 	}
 	rb.SetPrompt(prompt)
 	return rb
+}
+
+func (r *RuneBuffer) SetConfig(cfg *Config) {
+	r.cfg = cfg
+	r.interactive = cfg.useInteractive()
 }
 
 func (r *RuneBuffer) SetMask(m rune) {
@@ -125,6 +134,16 @@ func (r *RuneBuffer) MoveForward() {
 			return
 		}
 		r.idx++
+	})
+}
+
+func (r *RuneBuffer) IsCursorInEnd() bool {
+	return r.idx == len(r.buf)
+}
+
+func (r *RuneBuffer) Replace(ch rune) {
+	r.Refresh(func() {
+		r.buf[r.idx] = ch
 	})
 }
 
@@ -276,7 +295,7 @@ func (r *RuneBuffer) MoveToLineEnd() {
 }
 
 func (r *RuneBuffer) LineCount() int {
-	return LineCount(runes.WidthAll(r.buf) + r.PromptLen())
+	return LineCount(r.cfg.StdoutFd, runes.WidthAll(r.buf)+r.PromptLen())
 }
 
 func (r *RuneBuffer) MoveTo(ch rune, prevChar, reverse bool) (success bool) {
@@ -310,9 +329,9 @@ func (r *RuneBuffer) MoveTo(ch rune, prevChar, reverse bool) (success bool) {
 
 func (r *RuneBuffer) IdxLine() int {
 	totalWidth := runes.WidthAll(r.buf[:r.idx]) + r.PromptLen()
-	w := getWidth()
-	if w == 0 {
-		return 0
+	w := getWidth(r.cfg.StdoutFd)
+	if w <= 0 {
+		return -1
 	}
 	line := totalWidth / w
 
@@ -332,6 +351,12 @@ func (r *RuneBuffer) CursorLineCount() int {
 }
 
 func (r *RuneBuffer) Refresh(f func()) {
+	if !r.interactive {
+		if f != nil {
+			f()
+		}
+		return
+	}
 	r.Clean()
 	if f != nil {
 		f()
@@ -360,7 +385,7 @@ func (r *RuneBuffer) output() []byte {
 }
 
 func (r *RuneBuffer) Reset() []rune {
-	ret := r.buf
+	ret := runes.Copy(r.buf)
 	r.buf = r.buf[:0]
 	r.idx = 0
 	return ret
@@ -424,7 +449,7 @@ func (r *RuneBuffer) cleanOutput() []byte {
 }
 
 func (r *RuneBuffer) Clean() {
-	if r.cleanInScreen {
+	if r.cleanInScreen || !r.interactive {
 		return
 	}
 	r.cleanInScreen = true

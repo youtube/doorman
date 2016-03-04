@@ -1,0 +1,74 @@
+hash: 9b2273d02c018df37c0db9b7dd185eea324c12aead7253769c6a681a18c19e6e
+updated: 2016-03-04T17:11:00.590537942+01:00
+imports:
+- name: bitbucket.org/ww/goautoneg
+  version: 75cd24fc2f2c
+- name: github.com/beorn7/perks
+  version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
+  subpackages:
+  - quantile
+- name: github.com/chzyer/readline
+  version: e9e6c35b06f2397adec3a6a5dfa89969d706b9fc
+  subpackages:
+  - runes
+- name: github.com/coreos/etcd
+  version: 3b185f130a000ab7600f04e051365f1ec4197619
+  subpackages:
+  - client
+  - Godeps/_workspace/src/github.com/ugorji/go/codec
+  - Godeps/_workspace/src/golang.org/x/net/context
+  - pkg/pathutil
+  - pkg/types
+- name: github.com/golang/glog
+  version: 23def4e6c14b4da8ac2ed8007337bc5eb5007998
+- name: github.com/golang/protobuf
+  version: c75fbf01dc6cb73649c4cd4326182c3e44aa9dbb
+  subpackages:
+  - proto
+- name: github.com/google/shlex
+  version: 6f45313302b9c56850fc17f99e40caebce98c716
+- name: github.com/matttproud/golang_protobuf_extensions
+  version: fc2b8d3a73c4867e51861bbdd5ae3c1f0869dd6a
+  subpackages:
+  - pbutil
+- name: github.com/pborman/uuid
+  version: c55201b036063326c5b1b89ccfe45a184973d073
+- name: github.com/prometheus/client_golang
+  version: 18acf9993a863f4c4b40612e19cdd243e7c86831
+  subpackages:
+  - prometheus
+- name: github.com/prometheus/client_model
+  version: fa8ad6fec33561be4280a8f0514318c79d7f6cb6
+  subpackages:
+  - go
+- name: github.com/prometheus/common
+  version: ffe929a3f4c4faeaa10f2b9535c2b1be3ad15650
+  subpackages:
+  - expfmt
+  - model
+- name: github.com/prometheus/procfs
+  version: 406e5b7bfd8201a36e2bb5f7bdae0b03380c2ce8
+- name: golang.org/x/crypto
+  version: 5dc8cb4b8a8eb076cbb5a06bc3b8682c15bdbbd3
+  subpackages:
+  - ssh/terminal
+- name: golang.org/x/net
+  version: 6acef71eb69611914f7a30939ea9f6e194c78172
+  subpackages:
+  - context
+  - http2
+  - trace
+  - http2/hpack
+  - internal/timeseries
+- name: google.golang.org/grpc
+  version: b88c12e7caf74af3928de99a864aaa9916fa5aad
+  subpackages:
+  - codes
+  - credentials
+  - examples/helloworld/helloworld
+  - grpclog
+  - metadata
+  - naming
+  - transport
+  - peer
+devImports: []

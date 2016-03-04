@@ -1,0 +1,25 @@
+package: github.com/youtube/doorman
+import:
+- package: github.com/chzyer/readline
+- package: github.com/coreos/etcd
+  subpackages:
+  - client
+- package: github.com/golang/glog
+- package: github.com/golang/protobuf
+  subpackages:
+  - proto
+- package: github.com/google/shlex
+- package: github.com/pborman/uuid
+- package: github.com/prometheus/client_golang
+  subpackages:
+  - prometheus
+- package: golang.org/x/net
+  subpackages:
+  - context
+- package: google.golang.org/grpc
+  subpackages:
+  - codes
+  - credentials
+  - examples/helloworld/helloworld
+  - grpclog
+- package: bitbucket.org/ww/goautoneg

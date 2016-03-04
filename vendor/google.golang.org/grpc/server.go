@@ -270,7 +270,7 @@ func (s *Server) handleRawConn(listenerAddr net.Addr, rawConn net.Conn) {
 		s.mu.Lock()
 		s.errorf("ServerHandshake(%q) failed: %v", rawConn.RemoteAddr(), err)
 		s.mu.Unlock()
-		grpclog.Println("grpc: Server.Serve failed to complete security handshake.")
+		grpclog.Printf("grpc: Server.Serve failed to complete security handshake from %q: %v", rawConn.RemoteAddr(), err)
 		rawConn.Close()
 		return
 	}
@@ -446,12 +446,15 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 			}
 		}()
 	}
-	p := &parser{s: stream}
+	p := &parser{r: stream}
 	for {
 		pf, req, err := p.recvMsg()
 		if err == io.EOF {
 			// The entire stream is done (for unary RPC only).
 			return err
+		}
+		if err == io.ErrUnexpectedEOF {
+			err = transport.StreamError{Code: codes.Internal, Desc: "io.ErrUnexpectedEOF"}
 		}
 		if err != nil {
 			switch err := err.(type) {
@@ -558,7 +561,7 @@ func (s *Server) processStreamingRPC(t transport.ServerTransport, stream *transp
 	ss := &serverStream{
 		t:      t,
 		s:      stream,
-		p:      &parser{s: stream},
+		p:      &parser{r: stream},
 		codec:  s.opts.codec,
 		cp:     s.opts.cp,
 		dc:     s.opts.dc,
