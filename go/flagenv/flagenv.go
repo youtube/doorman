@@ -52,7 +52,7 @@ func Populate(set *flag.FlagSet, prefix string) error {
 		if len(kv) < 1 {
 			continue
 		}
-		if name := kv[0]; strings.HasPrefix(name, prefix) && !knownEnv[env] {
+		if name := kv[0]; strings.HasPrefix(name, prefix) && !knownEnv[name] {
 			log.Warningf("Unrecognized environment variable %s", name)
 		}
 	}
