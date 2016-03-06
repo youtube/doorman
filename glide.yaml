@@ -23,3 +23,5 @@ import:
   - examples/helloworld/helloworld
   - grpclog
 - package: bitbucket.org/ww/goautoneg
+- package: github.com/ghodss/yaml
+- package: gopkg.in/yaml.v2
