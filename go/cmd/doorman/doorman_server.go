@@ -26,11 +26,11 @@ import (
 	"golang.org/x/net/context"
 
 	log "github.com/golang/glog"
-	"github.com/golang/protobuf/proto"
 	"github.com/prometheus/client_golang/prometheus"
 	rpc "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	"github.com/ghodss/yaml"
 	"github.com/youtube/doorman/go/configuration"
 	"github.com/youtube/doorman/go/connection"
 	"github.com/youtube/doorman/go/flagenv"
@@ -209,7 +209,7 @@ func main() {
 				continue
 			}
 			cfg := new(pb.ResourceRepository)
-			if err := proto.UnmarshalText(string(data), cfg); err != nil {
+			if err := yaml.Unmarshal(data, cfg); err != nil {
 				log.Errorf("cannot unmarshal config data: %q", data)
 				continue
 			}
