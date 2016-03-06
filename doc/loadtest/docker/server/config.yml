@@ -1,0 +1,25 @@
+resources:
+  - identifier_glob: "proportional"
+    capacity: 5000
+    safe_capacity: 10
+    description: "proportional example"
+    algorithm:
+      kind: PROPORTIONAL_SHARE
+      lease_length: 60
+      refresh_interval: 15
+  - identifier_glob: "fair"
+    capacity: 5000
+    safe_capacity: 10
+    description: "fair share example"
+    algorithm:
+      kind: FAIR_SHARE
+      lease_length: 60
+      refresh_interval: 15
+  - identifier_glob: "*"
+    capacity: 1000
+    safe_capacity: 10
+    description: "test"
+    algorithm:
+      kind: FAIR_SHARE
+      lease_length: 60
+      refresh_interval: 15

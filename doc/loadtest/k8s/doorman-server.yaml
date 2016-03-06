@@ -38,7 +38,7 @@ spec:
       containers:
         - name: doorman-server
           image: gcr.io/google.com/doorman/doorman-server:v0.1.7
-          command: ["doorman", "-logtostderr", "-port=3667", "-debug_port=3668", "-config=./config.prototext"]
+          command: ["doorman", "-logtostderr", "-port=3667", "-debug_port=3668", "-config=./config.yml"]
           resources:
             limits:
               cpu: 0.8

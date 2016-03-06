@@ -35,7 +35,7 @@ go get github.com/youtube/doorman/go/cmd/doorman
 
 ## Preparing the configuration
 
-Doorman's configuration file uses the protobuf text format. [config.prototext](config.prototext) sets up 2 resources:
+Doorman's configuration file uses the YAML format. [config.yml](config.yml) sets up 2 resources:
 
 + `proportional`, which uses the [PROPORTIONAL_SHARE](../algorithms.md#proportional_share) algorithm, with capacity 100.
 + `fair`, which uses the [FAIR_SHARE](../algorithms.md#fair_share) algorithm, with capacity 400.

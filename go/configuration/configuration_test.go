@@ -7,24 +7,24 @@ func TestParseSource(t *testing.T) {
 		text, path, kind string
 	}{
 		{
-			text: "config.prototext",
+			text: "config.yml",
 			kind: "file",
-			path: "config.prototext",
+			path: "config.yml",
 		},
 		{
-			text: "file:config.prototext",
+			text: "file:config.yml",
 			kind: "file",
-			path: "config.prototext",
+			path: "config.yml",
 		},
 		{
-			text: "colons:in:name:good:idea:config.prototext",
+			text: "colons:in:name:good:idea:config.yml",
 			kind: "file",
-			path: "colons:in:name:good:idea:config.prototext",
+			path: "colons:in:name:good:idea:config.yml",
 		},
 		{
-			text: "etcd:/config.prototext",
+			text: "etcd:/config.yml",
 			kind: "etcd",
-			path: "/config.prototext",
+			path: "/config.yml",
 		},
 	} {
 		kind, path := ParseSource(c.text)

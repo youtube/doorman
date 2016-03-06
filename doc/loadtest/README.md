@@ -229,7 +229,7 @@ doorman-server-le54r   1/1       Running   0          15s
 This is running the Doorman server with a command line like this:
 
 ```console
-doorman -logtostderr -port=3667 -debug_port=3668 -config=./config.prototext
+doorman -logtostderr -port=3667 -debug_port=3668 -config=./config.yml
 ```
 
 Let's take a look at its logs to verify everything is fine:
@@ -362,7 +362,7 @@ What happens with the number of requests the server is doing? How about the QPS 
 
 ### Different Algorithms
 
-Experiment with different capacity distribution algorithms. Edit [`config.protext`](docker/server/config.prototext) to use the [FAIR_SHARE](../algorithms.md#fair_share) algorithm. Does it have any effect on the metrics?
+Experiment with different capacity distribution algorithms. Edit [`config.yml`](docker/server/config.yml) to use the [FAIR_SHARE](../algorithms.md#fair_share) algorithm. Does it have any effect on the metrics?
 
 ### High Availability
 
