@@ -7,16 +7,10 @@ In this tutorial we'll start a simple cluster consisting of 3 doorman servers. T
 
 [etcd](https://github.com/coreos/etcd) is a [distributed lock manager](https://en.wikipedia.org/wiki/Distributed_lock_manager) that Doorman uses for leader election.
 
-On OS X, you can use [Homebrew](http://brew.sh/)
+Retrieve and build etcd:
 
 ```sh
-brew install etcd
-```
-
-On Ubuntu, you can do
-
-```sh
-sudo apt-get install etcd
+go get github.com/coreos/etcd
 ```
 
 ### Foreman
