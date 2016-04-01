@@ -74,6 +74,10 @@ show
   the asynchronous nature of the Doorman API you may not see the
   requested assignments immediately.
 
+master
+
+  Shows the current Doorman master for each client.
+
 help
   
   Show this information.
@@ -223,7 +227,11 @@ func (client *Multiclient) Eval(command []string) error {
 		}
 		clientID, resourceID := tail[0], tail[1]
 		return client.Release(clientID, resourceID)
-
+  case "master":
+    for k, v := range client.clients {
+      fmt.Printf("%s: %s\n", k, v.GetMaster())
+    }
+    return nil
 	case "help":
 		fmt.Fprintln(os.Stderr, help)
 		return nil
@@ -232,7 +240,6 @@ func (client *Multiclient) Eval(command []string) error {
 	default:
 		return errors.New("unrecognized command")
 	}
-
 }
 
 func (client *Multiclient) Close() {

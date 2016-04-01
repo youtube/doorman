@@ -105,7 +105,6 @@ type Option connection.Option
 
 // getClientID returns a unique client id, consisting of a host:pid id plus a counter
 func getClientID() string {
-
 	hostname, err := os.Hostname()
 
 	if err != nil {
@@ -199,6 +198,15 @@ func NewWithID(addr string, id string, opts ...Option) (*Client, error) {
 	go client.run()
 
 	return client, nil
+}
+
+// GetMaster returns the address of the Doorman master we are connected to.
+func (client *Client) GetMaster() string {
+  if client.conn == nil {
+    return ""
+  }
+
+  return client.conn.String()
 }
 
 // run is the client's main loop. It takes care of requesting new
