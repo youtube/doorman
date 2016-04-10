@@ -24,7 +24,7 @@ Note: The Doorman system is *cooperative*. The clients are expected to honour th
 
 In the normal operation of the system the clients all check in regularly with the server to refresh their capacity. The server knows of all clients and their resource needs, and on every request makes the best possible apportionment of the capacity. For optimization purposes (reduce qps on the Doorman server) the client code does bulk refreshes for all resources whenever it sends out a request to the Doorman server. This means that under specific circumstances (for instance when registering a new resource) a resource might get its capacity refreshed a bit sooner than expected.
 
-The Doorman configuration specifies with Algorithm should be used to distribute capacity among all clients. The page on Algorithms explains which algorithms currently are available and how that algorithm apportions capacity.
+The Doorman configuration specifies which algorithm should be used to distribute capacity among all clients. The page on algorithms explains which algorithms currently are available and how they apportion capacity to each client.
 
 The two parameters lease\_length and refresh\_interval optimize a number of different behaviors of the system:
 
