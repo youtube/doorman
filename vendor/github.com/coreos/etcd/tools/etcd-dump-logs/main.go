@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,7 +75,7 @@ func main() {
 		fmt.Println("Start dupmping log entries from snapshot.")
 	}
 
-	w, err := wal.Open(walDir(*from), walsnap)
+	w, err := wal.OpenForRead(walDir(*from), walsnap)
 	if err != nil {
 		log.Fatalf("Failed opening WAL: %v", err)
 	}

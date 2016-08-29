@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/pkg/capnslog"
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/jonboulle/clockwork"
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
-	"github.com/coreos/etcd/storage"
+	"github.com/coreos/etcd/mvcc"
+	"github.com/coreos/pkg/capnslog"
+	"github.com/jonboulle/clockwork"
+	"golang.org/x/net/context"
 )
 
 var (
@@ -96,7 +96,7 @@ func (t *Periodic) Run() {
 
 			plog.Noticef("Starting auto-compaction at revision %d", rev)
 			_, err := t.c.Compact(t.ctx, &pb.CompactionRequest{Revision: rev})
-			if err == nil || err == storage.ErrCompacted {
+			if err == nil || err == mvcc.ErrCompacted {
 				t.revs = make([]int64, 0)
 				last = clock.Now()
 				plog.Noticef("Finished auto-compaction at revision %d", rev)

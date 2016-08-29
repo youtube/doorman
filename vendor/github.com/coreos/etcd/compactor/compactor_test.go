@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/jonboulle/clockwork"
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/coreos/etcd/pkg/testutil"
+	"github.com/jonboulle/clockwork"
+	"golang.org/x/net/context"
 )
 
 func TestPeriodic(t *testing.T) {
@@ -76,7 +76,7 @@ func TestPeriodicPause(t *testing.T) {
 
 	select {
 	case a := <-compactable.Chan():
-		t.Fatal("unexpected action %v", a)
+		t.Fatalf("unexpected action %v", a)
 	case <-time.After(10 * time.Millisecond):
 	}
 

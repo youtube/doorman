@@ -52,7 +52,9 @@ import (
 var (
 	expectedRequest  = "ping"
 	expectedResponse = "pong"
+	weirdError       = "format verbs: %v%s"
 	sizeLargeErr     = 1024 * 1024
+	canceled         = 0
 )
 
 type testCodec struct {
@@ -72,13 +74,14 @@ func (testCodec) String() string {
 }
 
 type testStreamHandler struct {
-	t transport.ServerTransport
+	port string
+	t    transport.ServerTransport
 }
 
 func (h *testStreamHandler) handleStream(t *testing.T, s *transport.Stream) {
 	p := &parser{r: s}
 	for {
-		pf, req, err := p.recvMsg()
+		pf, req, err := p.recvMsg(math.MaxInt32)
 		if err == io.EOF {
 			break
 		}
@@ -95,6 +98,20 @@ func (h *testStreamHandler) handleStream(t *testing.T, s *transport.Stream) {
 			t.Errorf("Failed to unmarshal the received message: %v", err)
 			return
 		}
+		if v == "weird error" {
+			h.t.WriteStatus(s, codes.Internal, weirdError)
+			return
+		}
+		if v == "canceled" {
+			canceled++
+			h.t.WriteStatus(s, codes.Internal, "")
+			return
+		}
+		if v == "port" {
+			h.t.WriteStatus(s, codes.Internal, h.port)
+			return
+		}
+
 		if v != expectedRequest {
 			h.t.WriteStatus(s, codes.Internal, strings.Repeat("A", sizeLargeErr))
 			return
@@ -122,7 +139,7 @@ func newTestServer() *server {
 	return &server{startedErr: make(chan error, 1)}
 }
 
-// start starts server. Other goroutines should block on s.startedErr for futher operations.
+// start starts server. Other goroutines should block on s.startedErr for further operations.
 func (s *server) start(t *testing.T, port int, maxStreams uint32) {
 	var err error
 	if port == 0 {
@@ -149,7 +166,7 @@ func (s *server) start(t *testing.T, port int, maxStreams uint32) {
 		}
 		st, err := transport.NewServerTransport("http2", conn, maxStreams, nil)
 		if err != nil {
-			return
+			continue
 		}
 		s.mu.Lock()
 		if s.conns == nil {
@@ -159,7 +176,10 @@ func (s *server) start(t *testing.T, port int, maxStreams uint32) {
 		}
 		s.conns[st] = true
 		s.mu.Unlock()
-		h := &testStreamHandler{st}
+		h := &testStreamHandler{
+			port: s.port,
+			t:    st,
+		}
 		go st.HandleStreams(func(s *transport.Stream) {
 			go h.handleStream(t, s)
 		})
@@ -214,12 +234,60 @@ func TestInvokeLargeErr(t *testing.T) {
 	var reply string
 	req := "hello"
 	err := Invoke(context.Background(), "/foo/bar", &req, &reply, cc)
-	if _, ok := err.(rpcError); !ok {
+	if _, ok := err.(*rpcError); !ok {
 		t.Fatalf("grpc.Invoke(_, _, _, _, _) receives non rpc error.")
 	}
 	if Code(err) != codes.Internal || len(ErrorDesc(err)) != sizeLargeErr {
 		t.Fatalf("grpc.Invoke(_, _, _, _, _) = %v, want an error of code %d and desc size %d", err, codes.Internal, sizeLargeErr)
 	}
 	cc.Close()
+	server.stop()
+}
+
+// TestInvokeErrorSpecialChars checks that error messages don't get mangled.
+func TestInvokeErrorSpecialChars(t *testing.T) {
+	server, cc := setUp(t, 0, math.MaxUint32)
+	var reply string
+	req := "weird error"
+	err := Invoke(context.Background(), "/foo/bar", &req, &reply, cc)
+	if _, ok := err.(*rpcError); !ok {
+		t.Fatalf("grpc.Invoke(_, _, _, _, _) receives non rpc error.")
+	}
+	if got, want := ErrorDesc(err), weirdError; got != want {
+		t.Fatalf("grpc.Invoke(_, _, _, _, _) error = %q, want %q", got, want)
+	}
+	cc.Close()
+	server.stop()
+}
+
+// TestInvokeCancel checks that an Invoke with a canceled context is not sent.
+func TestInvokeCancel(t *testing.T) {
+	server, cc := setUp(t, 0, math.MaxUint32)
+	var reply string
+	req := "canceled"
+	for i := 0; i < 100; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		Invoke(ctx, "/foo/bar", &req, &reply, cc)
+	}
+	if canceled != 0 {
+		t.Fatalf("received %d of 100 canceled requests", canceled)
+	}
+	cc.Close()
+	server.stop()
+}
+
+// TestInvokeCancelClosedNonFail checks that a canceled non-failfast RPC
+// on a closed client will terminate.
+func TestInvokeCancelClosedNonFailFast(t *testing.T) {
+	server, cc := setUp(t, 0, math.MaxUint32)
+	var reply string
+	cc.Close()
+	req := "hello"
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := Invoke(ctx, "/foo/bar", &req, &reply, cc, FailFast(false)); err == nil {
+		t.Fatalf("canceled invoke on closed connection should fail")
+	}
 	server.stop()
 }

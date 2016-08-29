@@ -2,29 +2,43 @@ package readline
 
 import (
 	"bufio"
+	"bytes"
 	"strconv"
-	"syscall"
-
-	"golang.org/x/crypto/ssh/terminal"
+	"sync"
+	"time"
 )
 
 var (
-	StdinFd   = int(uintptr(syscall.Stdin))
-	StdoutFd  = int(uintptr(syscall.Stdout))
 	isWindows = false
 )
 
-// IsTerminal returns true if the given file descriptor is a terminal.
-func IsTerminal(fd int) bool {
-	return terminal.IsTerminal(fd)
+// WaitForResume need to call before current process got suspend.
+// It will run a ticker until a long duration is occurs,
+// which means this process is resumed.
+func WaitForResume() chan struct{} {
+	ch := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		ticker := time.NewTicker(10 * time.Millisecond)
+		t := time.Now()
+		wg.Done()
+		for {
+			now := <-ticker.C
+			if now.Sub(t) > 100*time.Millisecond {
+				break
+			}
+			t = now
+		}
+		ticker.Stop()
+		ch <- struct{}{}
+	}()
+	wg.Wait()
+	return ch
 }
 
-func MakeRaw(fd int) (*terminal.State, error) {
-	return terminal.MakeRaw(fd)
-}
-
-func Restore(fd int, state *terminal.State) error {
-	err := terminal.Restore(fd, state)
+func Restore(fd int, state *State) error {
+	err := restoreTerm(fd, state)
 	if err != nil {
 		// errno 0 means everything is ok :)
 		if err.Error() == "errno 0" {
@@ -68,7 +82,7 @@ func escapeExKey(r rune, reader *bufio.Reader) rune {
 }
 
 // translate EscX to Meta+X
-func escapeKey(r rune) rune {
+func escapeKey(r rune, reader *bufio.Reader) rune {
 	switch r {
 	case 'b':
 		r = MetaBackward
@@ -80,15 +94,42 @@ func escapeKey(r rune) rune {
 		r = MetaTranspose
 	case CharBackspace:
 		r = MetaBackspace
+	case 'O':
+		d, _, _ := reader.ReadRune()
+		switch d {
+		case 'H':
+			r = CharLineStart
+		case 'F':
+			r = CharLineEnd
+		default:
+			reader.UnreadRune()
+		}
 	case CharEsc:
 
 	}
 	return r
 }
 
+func SplitByLine(start, screenWidth int, rs []rune) []string {
+	var ret []string
+	buf := bytes.NewBuffer(nil)
+	currentWidth := start
+	for _, r := range rs {
+		w := runes.Width(r)
+		currentWidth += w
+		buf.WriteRune(r)
+		if currentWidth >= screenWidth {
+			ret = append(ret, buf.String())
+			buf.Reset()
+			currentWidth = 0
+		}
+	}
+	ret = append(ret, buf.String())
+	return ret
+}
+
 // calculate how many lines for N character
-func LineCount(stdoutFd int, w int) int {
-	screenWidth := getWidth(stdoutFd)
+func LineCount(screenWidth, w int) int {
 	r := w / screenWidth
 	if w%screenWidth != 0 {
 		r++
@@ -97,13 +138,14 @@ func LineCount(stdoutFd int, w int) int {
 }
 
 func IsWordBreak(i rune) bool {
-	if i >= 'a' && i <= 'z' {
-		return false
+	switch {
+	case i >= 'a' && i <= 'z':
+	case i >= 'A' && i <= 'Z':
+	case i >= '0' && i <= '9':
+	default:
+		return true
 	}
-	if i >= 'A' && i <= 'Z' {
-		return false
-	}
-	return true
+	return false
 }
 
 func GetInt(s []string, def int) int {
@@ -115,4 +157,20 @@ func GetInt(s []string, def int) int {
 		return def
 	}
 	return c
+}
+
+type RawMode struct {
+	state *State
+}
+
+func (r *RawMode) Enter() (err error) {
+	r.state, err = MakeRaw(GetStdin())
+	return err
+}
+
+func (r *RawMode) Exit() error {
+	if r.state == nil {
+		return nil
+	}
+	return Restore(GetStdin(), r.state)
 }

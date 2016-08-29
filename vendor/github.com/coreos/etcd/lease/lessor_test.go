@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,10 +19,11 @@ import (
 	"os"
 	"path"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 
-	"github.com/coreos/etcd/storage/backend"
+	"github.com/coreos/etcd/mvcc/backend"
 )
 
 // TestLessorGrant ensures Lessor can grant wanted lease.
@@ -34,7 +35,7 @@ func TestLessorGrant(t *testing.T) {
 	defer be.Close()
 
 	le := newLessor(be)
-	le.Promote()
+	le.Promote(0)
 
 	l, err := le.Grant(1, 1)
 	if err != nil {
@@ -96,7 +97,7 @@ func TestLessorRevoke(t *testing.T) {
 		{"bar"},
 	}
 
-	if err := le.Attach(l.ID, items); err != nil {
+	if err = le.Attach(l.ID, items); err != nil {
 		t.Fatalf("failed to attach items to the lease: %v", err)
 	}
 
@@ -108,7 +109,8 @@ func TestLessorRevoke(t *testing.T) {
 		t.Errorf("got revoked lease %x", l.ID)
 	}
 
-	wdeleted := []string{"foo_", "bar_"}
+	wdeleted := []string{"bar_", "foo_"}
+	sort.Sort(sort.StringSlice(fd.deleted))
 	if !reflect.DeepEqual(fd.deleted, wdeleted) {
 		t.Errorf("deleted= %v, want %v", fd.deleted, wdeleted)
 	}
@@ -128,7 +130,7 @@ func TestLessorRenew(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	le := newLessor(be)
-	le.Promote()
+	le.Promote(0)
 
 	l, err := le.Grant(1, 5)
 	if err != nil {
@@ -221,9 +223,17 @@ type fakeDeleter struct {
 	deleted []string
 }
 
-func (fd *fakeDeleter) DeleteRange(key, end []byte) (int64, int64) {
+func (fd *fakeDeleter) TxnBegin() int64 {
+	return 0
+}
+
+func (fd *fakeDeleter) TxnEnd(txnID int64) error {
+	return nil
+}
+
+func (fd *fakeDeleter) TxnDeleteRange(tid int64, key, end []byte) (int64, int64, error) {
 	fd.deleted = append(fd.deleted, string(key)+"_"+string(end))
-	return 0, 0
+	return 0, 0, nil
 }
 
 func NewTestBackend(t *testing.T) (string, backend.Backend) {

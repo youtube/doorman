@@ -1,78 +1,75 @@
-hash: 652c48c6d0018deef43ba2c2cbedf4138d1837234a4860702f4b2ec1d1318a09
-updated: 2016-03-06T13:52:42.10251466+01:00
+hash: 50931e6bfa1ed3f0dcab69dc8b6c9849c4e68ec5259ef3638a11c11e1a686f07
+updated: 2016-08-29T14:36:47.46451651+05:30
 imports:
-- name: bitbucket.org/ww/goautoneg
-  version: 75cd24fc2f2c
 - name: github.com/beorn7/perks
-  version: 6f93817c410418147023369723c6a05a15d93cb6
+  version: 4c0e84591b9aa9e6dcfdf3e020114cd81f89d5f9
   subpackages:
   - quantile
 - name: github.com/chzyer/readline
-  version: 6f93817c410418147023369723c6a05a15d93cb6
-  subpackages:
-  - runes
+  version: 62c6fe6193755f722b8b8788aa7357be55a50ff1
+- name: github.com/cloudfoundry-incubator/candiedyaml
+  version: 99c3df83b51532e3615f851d8c2dbb638f5313bf
 - name: github.com/coreos/etcd
-  version: 6f93817c410418147023369723c6a05a15d93cb6
+  version: 9efa00d1030d4bf62eb8e5ec130023aeb1b8e2d0
   subpackages:
   - client
-  - Godeps/_workspace/src/github.com/ugorji/go/codec
-  - Godeps/_workspace/src/golang.org/x/net/context
   - pkg/pathutil
   - pkg/types
 - name: github.com/ghodss/yaml
-  version: 73d445a93680fa1a78ae23a5839bad48f32ba1ee
+  version: aa0c862057666179de291b67d9f093d12b5a8473
 - name: github.com/golang/glog
-  version: 6f93817c410418147023369723c6a05a15d93cb6
+  version: 23def4e6c14b4da8ac2ed8007337bc5eb5007998
 - name: github.com/golang/protobuf
-  version: 6f93817c410418147023369723c6a05a15d93cb6
+  version: 888eb0692c857ec880338addf316bd662d5e630e
   subpackages:
   - proto
 - name: github.com/google/shlex
-  version: 6f93817c410418147023369723c6a05a15d93cb6
+  version: 6f45313302b9c56850fc17f99e40caebce98c716
 - name: github.com/matttproud/golang_protobuf_extensions
-  version: ""
+  version: c12348ce28de40eed0136aa2b644d0ee0650e56c
   subpackages:
   - pbutil
 - name: github.com/pborman/uuid
-  version: 6f93817c410418147023369723c6a05a15d93cb6
+  version: a97ce2ca70fa5a848076093f05e639a89ca34d06
 - name: github.com/prometheus/client_golang
-  version: 6f93817c410418147023369723c6a05a15d93cb6
+  version: c5b7fccd204277076155f10851dad72b76a49317
   subpackages:
   - prometheus
 - name: github.com/prometheus/client_model
-  version: 6f93817c410418147023369723c6a05a15d93cb6
+  version: fa8ad6fec33561be4280a8f0514318c79d7f6cb6
   subpackages:
   - go
 - name: github.com/prometheus/common
-  version: ""
+  version: 086fbd0536bd9c043653ae7e918882f8b435a0d5
   subpackages:
   - expfmt
+  - internal/bitbucket.org/ww/goautoneg
   - model
 - name: github.com/prometheus/procfs
-  version: 6f93817c410418147023369723c6a05a15d93cb6
-- name: golang.org/x/crypto
-  version: 6f93817c410418147023369723c6a05a15d93cb6
+  version: abf152e5f3e97f2fafac028d2cc06c1feb87ffa5
+- name: github.com/ugorji/go
+  version: 5cd0f2b3b6cca8e3a0a4101821e41a73cb59bed6
   subpackages:
-  - ssh/terminal
+  - codec
 - name: golang.org/x/net
-  version: ""
+  version: 6250b412798208e6c90b03b7c4f226de5aa299e2
   subpackages:
   - context
   - http2
-  - trace
   - http2/hpack
   - internal/timeseries
+  - lex/httplex
+  - trace
 - name: google.golang.org/grpc
-  version: ""
+  version: 0032a855ba5c8a3c8e0d71c2deef354b70af1584
   subpackages:
   - codes
   - credentials
   - examples/helloworld/helloworld
   - grpclog
+  - internal
   - metadata
   - naming
-  - transport
   - peer
-- name: gopkg.in/yaml.v2
-  version: a83829b6f1293c91addabc89d0571c246397bbf4
-devImports: []
+  - transport
+testImports: []

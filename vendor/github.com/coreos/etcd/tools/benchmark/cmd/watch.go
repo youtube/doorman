@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,16 +15,18 @@
 package cmd
 
 import (
+	"encoding/binary"
 	"fmt"
+	"math/rand"
 	"os"
 	"sync/atomic"
 	"time"
 
 	v3 "github.com/coreos/etcd/clientv3"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/cheggaaa/pb"
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/spf13/cobra"
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
+	"github.com/spf13/cobra"
+	"golang.org/x/net/context"
+	"gopkg.in/cheggaaa/pb.v1"
 )
 
 // watchCmd represents the watch command
@@ -37,6 +39,7 @@ changing the value of the watched keys with concurrent put
 requests.
 
 During the test, each watcher watches (--total/--watchers) keys 
+
 (a watcher might watch on the same key multiple times if 
 --watched-key-total is small).
 
@@ -53,12 +56,15 @@ var (
 	watchPutRate  int
 	watchPutTotal int
 
+	watchKeySize      int
+	watchKeySpaceSize int
+	watchSeqKeys      bool
+
 	eventsTotal int
 
 	nrWatchCompleted       int32
 	nrRecvCompleted        int32
 	watchCompletedNotifier chan struct{}
-	putStartNotifier       chan struct{}
 	recvCompletedNotifier  chan struct{}
 )
 
@@ -70,12 +76,28 @@ func init() {
 
 	watchCmd.Flags().IntVar(&watchPutRate, "put-rate", 100, "Number of keys to put per second")
 	watchCmd.Flags().IntVar(&watchPutTotal, "put-total", 10000, "Number of put requests")
+
+	watchCmd.Flags().IntVar(&watchKeySize, "key-size", 32, "Key size of watch request")
+	watchCmd.Flags().IntVar(&watchKeySpaceSize, "key-space-size", 1, "Maximum possible keys")
+	watchCmd.Flags().BoolVar(&watchSeqKeys, "sequential-keys", false, "Use sequential keys")
 }
 
 func watchFunc(cmd *cobra.Command, args []string) {
+	if watchKeySpaceSize <= 0 {
+		fmt.Fprintf(os.Stderr, "expected positive --key-space-size, got (%v)", watchKeySpaceSize)
+		os.Exit(1)
+	}
+
 	watched := make([]string, watchedKeyTotal)
+	numWatchers := make(map[string]int)
 	for i := range watched {
-		watched[i] = string(mustRandBytes(32))
+		k := make([]byte, watchKeySize)
+		if watchSeqKeys {
+			binary.PutVarint(k, int64(i%watchKeySpaceSize))
+		} else {
+			binary.PutVarint(k, int64(rand.Intn(watchKeySpaceSize)))
+		}
+		watched[i] = string(k)
 	}
 
 	requests := make(chan string, totalClients)
@@ -86,8 +108,6 @@ func watchFunc(cmd *cobra.Command, args []string) {
 	for i := range streams {
 		streams[i] = v3.NewWatcher(clients[i%len(clients)])
 	}
-
-	putStartNotifier = make(chan struct{})
 
 	// watching phase
 	results = make(chan result)
@@ -106,7 +126,9 @@ func watchFunc(cmd *cobra.Command, args []string) {
 
 	go func() {
 		for i := 0; i < watchTotal; i++ {
-			requests <- watched[i%len(watched)]
+			key := watched[i%len(watched)]
+			requests <- key
+			numWatchers[key]++
 		}
 		close(requests)
 	}()
@@ -119,8 +141,10 @@ func watchFunc(cmd *cobra.Command, args []string) {
 	<-pdoneC
 
 	// put phase
-	// total number of puts * number of watchers on each key
-	eventsTotal = watchPutTotal * (watchTotal / watchedKeyTotal)
+	eventsTotal = 0
+	for i := 0; i < watchPutTotal; i++ {
+		eventsTotal += numWatchers[watched[i%len(watched)]]
+	}
 	results = make(chan result)
 	bar = pb.New(eventsTotal)
 
@@ -129,7 +153,6 @@ func watchFunc(cmd *cobra.Command, args []string) {
 
 	atomic.StoreInt32(&nrRecvCompleted, 0)
 	recvCompletedNotifier = make(chan struct{})
-	close(putStartNotifier)
 
 	putreqc := make(chan v3.Op)
 
@@ -140,7 +163,7 @@ func watchFunc(cmd *cobra.Command, args []string) {
 	pdoneC = printRate(results)
 
 	go func() {
-		for i := 0; i < eventsTotal; i++ {
+		for i := 0; i < watchPutTotal; i++ {
 			putreqc <- v3.OpPut(watched[i%(len(watched))], "data")
 			// TODO: use a real rate-limiter instead of sleep.
 			time.Sleep(time.Second / time.Duration(watchPutRate))
@@ -163,7 +186,7 @@ func doWatch(stream v3.Watcher, requests <-chan string) {
 		if wch == nil {
 			errStr = "could not open watch channel"
 		}
-		results <- result{errStr: errStr, duration: time.Since(st)}
+		results <- result{errStr: errStr, duration: time.Since(st), happened: time.Now()}
 		bar.Increment()
 		go recvWatchChan(wch)
 	}
@@ -171,19 +194,20 @@ func doWatch(stream v3.Watcher, requests <-chan string) {
 	if atomic.LoadInt32(&nrWatchCompleted) == int32(watchTotalStreams) {
 		watchCompletedNotifier <- struct{}{}
 	}
-
-	<-putStartNotifier
 }
 
 func recvWatchChan(wch v3.WatchChan) {
-	for range wch {
+	for r := range wch {
 		st := time.Now()
-		results <- result{duration: time.Since(st)}
-		bar.Increment()
+		for range r.Events {
+			results <- result{duration: time.Since(st), happened: time.Now()}
+			bar.Increment()
+			atomic.AddInt32(&nrRecvCompleted, 1)
+		}
 
-		atomic.AddInt32(&nrRecvCompleted, 1)
 		if atomic.LoadInt32(&nrRecvCompleted) == int32(eventsTotal) {
 			recvCompletedNotifier <- struct{}{}
+			break
 		}
 	}
 }

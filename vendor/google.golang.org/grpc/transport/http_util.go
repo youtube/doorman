@@ -35,6 +35,7 @@ package transport
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"net"
@@ -52,7 +53,7 @@ import (
 
 const (
 	// The primary user agent
-	primaryUA = "grpc-go/0.11"
+	primaryUA = "grpc-go/1.0"
 	// http2MaxFrameLen specifies the max length of a HTTP2 frame.
 	http2MaxFrameLen = 16384 // 16KB frame
 	// http://http2.github.io/http2-spec/#SettingValues
@@ -69,6 +70,7 @@ var (
 		http2.ErrCodeInternal:           codes.Internal,
 		http2.ErrCodeFlowControl:        codes.ResourceExhausted,
 		http2.ErrCodeSettingsTimeout:    codes.Internal,
+		http2.ErrCodeStreamClosed:       codes.Internal,
 		http2.ErrCodeFrameSize:          codes.Internal,
 		http2.ErrCodeRefusedStream:      codes.Unavailable,
 		http2.ErrCodeCancel:             codes.Canceled,
@@ -126,16 +128,40 @@ func isReservedHeader(hdr string) bool {
 	}
 }
 
+// isWhitelistedPseudoHeader checks whether hdr belongs to HTTP2 pseudoheaders
+// that should be propagated into metadata visible to users.
+func isWhitelistedPseudoHeader(hdr string) bool {
+	switch hdr {
+	case ":authority":
+		return true
+	default:
+		return false
+	}
+}
+
 func (d *decodeState) setErr(err error) {
 	if d.err == nil {
 		d.err = err
 	}
 }
 
+func validContentType(t string) bool {
+	e := "application/grpc"
+	if !strings.HasPrefix(t, e) {
+		return false
+	}
+	// Support variations on the content-type
+	// (e.g. "application/grpc+blah", "application/grpc;blah").
+	if len(t) > len(e) && t[len(e)] != '+' && t[len(e)] != ';' {
+		return false
+	}
+	return true
+}
+
 func (d *decodeState) processHeaderField(f hpack.HeaderField) {
 	switch f.Name {
 	case "content-type":
-		if !strings.Contains(f.Value, "application/grpc") {
+		if !validContentType(f.Value) {
 			d.setErr(StreamErrorf(codes.FailedPrecondition, "transport: received the unexpected content-type %q", f.Value))
 			return
 		}
@@ -149,11 +175,11 @@ func (d *decodeState) processHeaderField(f hpack.HeaderField) {
 		}
 		d.statusCode = codes.Code(code)
 	case "grpc-message":
-		d.statusDesc = f.Value
+		d.statusDesc = decodeGrpcMessage(f.Value)
 	case "grpc-timeout":
 		d.timeoutSet = true
 		var err error
-		d.timeout, err = timeoutDecode(f.Value)
+		d.timeout, err = decodeTimeout(f.Value)
 		if err != nil {
 			d.setErr(StreamErrorf(codes.Internal, "transport: malformed time-out: %v", err))
 			return
@@ -161,7 +187,7 @@ func (d *decodeState) processHeaderField(f hpack.HeaderField) {
 	case ":path":
 		d.method = f.Value
 	default:
-		if !isReservedHeader(f.Name) {
+		if !isReservedHeader(f.Name) || isWhitelistedPseudoHeader(f.Name) {
 			if f.Name == "user-agent" {
 				i := strings.LastIndex(f.Value, " ")
 				if i == -1 {
@@ -226,7 +252,7 @@ func div(d, r time.Duration) int64 {
 }
 
 // TODO(zhaoq): It is the simplistic and not bandwidth efficient. Improve it.
-func timeoutEncode(t time.Duration) string {
+func encodeTimeout(t time.Duration) string {
 	if d := div(t, time.Nanosecond); d <= maxTimeoutValue {
 		return strconv.FormatInt(d, 10) + "n"
 	}
@@ -246,7 +272,7 @@ func timeoutEncode(t time.Duration) string {
 	return strconv.FormatInt(div(t, time.Hour), 10) + "H"
 }
 
-func timeoutDecode(s string) (time.Duration, error) {
+func decodeTimeout(s string) (time.Duration, error) {
 	size := len(s)
 	if size < 2 {
 		return 0, fmt.Errorf("transport: timeout string is too short: %q", s)
@@ -263,6 +289,80 @@ func timeoutDecode(s string) (time.Duration, error) {
 	return d * time.Duration(t), nil
 }
 
+const (
+	spaceByte   = ' '
+	tildaByte   = '~'
+	percentByte = '%'
+)
+
+// encodeGrpcMessage is used to encode status code in header field
+// "grpc-message".
+// It checks to see if each individual byte in msg is an
+// allowable byte, and then either percent encoding or passing it through.
+// When percent encoding, the byte is converted into hexadecimal notation
+// with a '%' prepended.
+func encodeGrpcMessage(msg string) string {
+	if msg == "" {
+		return ""
+	}
+	lenMsg := len(msg)
+	for i := 0; i < lenMsg; i++ {
+		c := msg[i]
+		if !(c >= spaceByte && c < tildaByte && c != percentByte) {
+			return encodeGrpcMessageUnchecked(msg)
+		}
+	}
+	return msg
+}
+
+func encodeGrpcMessageUnchecked(msg string) string {
+	var buf bytes.Buffer
+	lenMsg := len(msg)
+	for i := 0; i < lenMsg; i++ {
+		c := msg[i]
+		if c >= spaceByte && c < tildaByte && c != percentByte {
+			buf.WriteByte(c)
+		} else {
+			buf.WriteString(fmt.Sprintf("%%%02X", c))
+		}
+	}
+	return buf.String()
+}
+
+// decodeGrpcMessage decodes the msg encoded by encodeGrpcMessage.
+func decodeGrpcMessage(msg string) string {
+	if msg == "" {
+		return ""
+	}
+	lenMsg := len(msg)
+	for i := 0; i < lenMsg; i++ {
+		if msg[i] == percentByte && i+2 < lenMsg {
+			return decodeGrpcMessageUnchecked(msg)
+		}
+	}
+	return msg
+}
+
+func decodeGrpcMessageUnchecked(msg string) string {
+	var buf bytes.Buffer
+	lenMsg := len(msg)
+	for i := 0; i < lenMsg; i++ {
+		c := msg[i]
+		if c == percentByte && i+2 < lenMsg {
+			parsed, err := strconv.ParseInt(msg[i+1:i+3], 16, 8)
+			if err != nil {
+				buf.WriteByte(c)
+			} else {
+				buf.WriteByte(byte(parsed))
+				i += 2
+			}
+		} else {
+			buf.WriteByte(c)
+		}
+	}
+	return buf.String()
+}
+
 type framer struct {
 	numWriters int32
 	reader     io.Reader
@@ -272,7 +372,7 @@ type framer struct {
 
 func newFramer(conn net.Conn) *framer {
 	f := &framer{
-		reader: conn,
+		reader: bufio.NewReaderSize(conn, http2IOBufSize),
 		writer: bufio.NewWriterSize(conn, http2IOBufSize),
 	}
 	f.fr = http2.NewFramer(f.writer, f.reader)
@@ -403,4 +503,8 @@ func (f *framer) flushWrite() error {
 
 func (f *framer) readFrame() (http2.Frame, error) {
 	return f.fr.ReadFrame()
+}
+
+func (f *framer) errorDetail() error {
+	return f.fr.ErrorDetail()
 }

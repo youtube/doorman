@@ -1,27 +1,30 @@
-package: github.com/youtube/doorman
+package: doorman
 import:
 - package: github.com/chzyer/readline
+  version: ^1.4.0
 - package: github.com/coreos/etcd
+  version: ^3.0.6
   subpackages:
   - client
+- package: github.com/ghodss/yaml
 - package: github.com/golang/glog
 - package: github.com/golang/protobuf
   subpackages:
   - proto
 - package: github.com/google/shlex
 - package: github.com/pborman/uuid
+  version: ^1.0.0
 - package: github.com/prometheus/client_golang
+  version: ^0.8.0
   subpackages:
   - prometheus
 - package: golang.org/x/net
   subpackages:
   - context
 - package: google.golang.org/grpc
+  version: ^1.0.1-GA
   subpackages:
   - codes
   - credentials
   - examples/helloworld/helloworld
   - grpclog
-- package: bitbucket.org/ww/goautoneg
-- package: github.com/ghodss/yaml
-- package: gopkg.in/yaml.v2

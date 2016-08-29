@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-
-	"github.com/chzyer/readline/runes"
 )
 
 type hisItem struct {
@@ -37,6 +35,11 @@ func newOpHistory(cfg *Config) (o *opHistory) {
 	return o
 }
 
+func (o *opHistory) Reset() {
+	o.history = list.New()
+	o.current = nil
+}
+
 func (o *opHistory) IsHistoryClosed() bool {
 	return o.fd.Fd() == ^(uintptr(0))
 }
@@ -63,11 +66,16 @@ func (o *opHistory) historyUpdatePath(path string) {
 	r := bufio.NewReader(o.fd)
 	total := 0
 	for ; ; total++ {
-		line, err := r.ReadSlice('\n')
+		line, err := r.ReadString('\n')
 		if err != nil {
 			break
 		}
-		o.Push([]rune(strings.TrimSpace(string(line))))
+		// ignore the empty line
+		line = strings.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		o.Push([]rune(line))
 		o.Compact()
 	}
 	if total > o.cfg.HistoryLimit {
@@ -211,13 +219,13 @@ func (o *opHistory) debug() {
 // save history
 func (o *opHistory) New(current []rune) (err error) {
 	current = runes.Copy(current)
+
 	// if just use last command without modify
 	// just clean lastest history
 	if back := o.history.Back(); back != nil {
 		prev := back.Prev()
 		if prev != nil {
-			use := o.showItem(o.current.Value.(*hisItem))
-			if runes.Equal(use, prev.Value.(*hisItem).Source) {
+			if runes.Equal(current, prev.Value.(*hisItem).Source) {
 				o.current = o.history.Back()
 				o.current.Value.(*hisItem).Clean()
 				o.historyVer++
@@ -225,6 +233,7 @@ func (o *opHistory) New(current []rune) (err error) {
 			}
 		}
 	}
+
 	if len(current) == 0 {
 		o.current = o.history.Back()
 		if o.current != nil {

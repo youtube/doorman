@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,12 +25,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/go-semver/semver"
 	"github.com/coreos/etcd/etcdserver/stats"
 	"github.com/coreos/etcd/pkg/httputil"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/version"
+	"github.com/coreos/go-semver/semver"
 )
 
 const (
@@ -97,7 +97,7 @@ type outgoingConn struct {
 
 // streamWriter writes messages to the attached outgoingConn.
 type streamWriter struct {
-	id     types.ID
+	peerID types.ID
 	status *peerStatus
 	fs     *stats.FollowerStats
 	r      Raft
@@ -116,7 +116,7 @@ type streamWriter struct {
 // messages and writes to the attached outgoing connection.
 func startStreamWriter(id types.ID, status *peerStatus, fs *stats.FollowerStats, r Raft) *streamWriter {
 	w := &streamWriter{
-		id:     id,
+		peerID: id,
 		status: status,
 		fs:     fs,
 		r:      r,
@@ -139,47 +139,56 @@ func (cw *streamWriter) run() {
 		batched    int
 	)
 	tickc := time.Tick(ConnReadTimeout / 3)
+	unflushed := 0
+
+	plog.Infof("started streaming with peer %s (writer)", cw.peerID)
 
 	for {
 		select {
 		case <-heartbeatc:
-			start := time.Now()
 			err := enc.encode(linkHeartbeatMessage)
+			unflushed += linkHeartbeatMessage.Size()
 			if err == nil {
 				flusher.Flush()
 				batched = 0
-				reportSentDuration(string(t), linkHeartbeatMessage, time.Since(start))
+				sentBytes.WithLabelValues(cw.peerID.String()).Add(float64(unflushed))
+				unflushed = 0
 				continue
 			}
 
-			reportSentFailure(string(t), linkHeartbeatMessage)
 			cw.status.deactivate(failureType{source: t.String(), action: "heartbeat"}, err.Error())
+
 			cw.close()
+			plog.Warningf("lost the TCP streaming connection with peer %s (%s writer)", cw.peerID, t)
 			heartbeatc, msgc = nil, nil
 
 		case m := <-msgc:
-			start := time.Now()
 			err := enc.encode(m)
 			if err == nil {
+				unflushed += m.Size()
+
 				if len(msgc) == 0 || batched > streamBufSize/2 {
 					flusher.Flush()
+					sentBytes.WithLabelValues(cw.peerID.String()).Add(float64(unflushed))
+					unflushed = 0
 					batched = 0
 				} else {
 					batched++
 				}
 
-				reportSentDuration(string(t), m, time.Since(start))
 				continue
 			}
 
-			reportSentFailure(string(t), m)
 			cw.status.deactivate(failureType{source: t.String(), action: "write"}, err.Error())
 			cw.close()
+			plog.Warningf("lost the TCP streaming connection with peer %s (%s writer)", cw.peerID, t)
 			heartbeatc, msgc = nil, nil
 			cw.r.ReportUnreachable(m.To)
 
 		case conn := <-cw.connc:
-			cw.close()
+			if cw.close() {
+				plog.Warningf("closed an existing TCP streaming connection with peer %s (%s writer)", cw.peerID, t)
+			}
 			t = conn.t
 			switch conn.t {
 			case streamTypeMsgAppV2:
@@ -190,15 +199,20 @@ func (cw *streamWriter) run() {
 				plog.Panicf("unhandled stream type %s", conn.t)
 			}
 			flusher = conn.Flusher
+			unflushed = 0
 			cw.mu.Lock()
 			cw.status.activate()
 			cw.closer = conn.Closer
 			cw.working = true
 			cw.mu.Unlock()
+			plog.Infof("established a TCP streaming connection with peer %s (%s writer)", cw.peerID, t)
 			heartbeatc, msgc = tickc, cw.msgc
 		case <-cw.stopc:
-			cw.close()
+			if cw.close() {
+				plog.Infof("closed the TCP streaming connection with peer %s (%s writer)", cw.peerID, t)
+			}
 			close(cw.done)
+			plog.Infof("stopped streaming with peer %s (writer)", cw.peerID)
 			return
 		}
 	}
@@ -210,18 +224,19 @@ func (cw *streamWriter) writec() (chan<- raftpb.Message, bool) {
 	return cw.msgc, cw.working
 }
 
-func (cw *streamWriter) close() {
+func (cw *streamWriter) close() bool {
 	cw.mu.Lock()
 	defer cw.mu.Unlock()
 	if !cw.working {
-		return
+		return false
 	}
 	cw.closer.Close()
 	if len(cw.msgc) > 0 {
-		cw.r.ReportUnreachable(uint64(cw.id))
+		cw.r.ReportUnreachable(uint64(cw.peerID))
 	}
 	cw.msgc = make(chan raftpb.Message, streamBufSize)
 	cw.working = false
+	return true
 }
 
 func (cw *streamWriter) attach(conn *outgoingConn) bool {
@@ -241,45 +256,40 @@ func (cw *streamWriter) stop() {
 // streamReader is a long-running go-routine that dials to the remote stream
 // endpoint and reads messages from the response body returned.
 type streamReader struct {
-	tr            *Transport
-	picker        *urlPicker
-	t             streamType
-	local, remote types.ID
-	cid           types.ID
-	status        *peerStatus
-	recvc         chan<- raftpb.Message
-	propc         chan<- raftpb.Message
-	errorc        chan<- error
+	peerID types.ID
+	typ    streamType
+
+	tr     *Transport
+	picker *urlPicker
+	status *peerStatus
+	recvc  chan<- raftpb.Message
+	propc  chan<- raftpb.Message
+
+	errorc chan<- error
 
 	mu     sync.Mutex
+	paused bool
 	cancel func()
 	closer io.Closer
-	stopc  chan struct{}
-	done   chan struct{}
+
+	stopc chan struct{}
+	done  chan struct{}
 }
 
-func startStreamReader(tr *Transport, picker *urlPicker, t streamType, local, remote, cid types.ID, status *peerStatus, recvc chan<- raftpb.Message, propc chan<- raftpb.Message, errorc chan<- error) *streamReader {
-	r := &streamReader{
-		tr:     tr,
-		picker: picker,
-		t:      t,
-		local:  local,
-		remote: remote,
-		cid:    cid,
-		status: status,
-		recvc:  recvc,
-		propc:  propc,
-		errorc: errorc,
-		stopc:  make(chan struct{}),
-		done:   make(chan struct{}),
+func (r *streamReader) start() {
+	r.stopc = make(chan struct{})
+	r.done = make(chan struct{})
+	if r.errorc == nil {
+		r.errorc = r.tr.ErrorC
 	}
+
 	go r.run()
-	return r
 }
 
 func (cr *streamReader) run() {
+	t := cr.typ
+	plog.Infof("started streaming with peer %s (%s reader)", cr.peerID, t)
 	for {
-		t := cr.t
 		rc, err := cr.dial(t)
 		if err != nil {
 			if err != errUnsupportedStreamType {
@@ -287,7 +297,9 @@ func (cr *streamReader) run() {
 			}
 		} else {
 			cr.status.activate()
+			plog.Infof("established a TCP streaming connection with peer %s (%s reader)", cr.peerID, cr.typ)
 			err := cr.decodeLoop(rc, t)
+			plog.Warningf("lost the TCP streaming connection with peer %s (%s reader)", cr.peerID, cr.typ)
 			switch {
 			// all data is read out
 			case err == io.EOF:
@@ -303,6 +315,7 @@ func (cr *streamReader) run() {
 		case <-time.After(100 * time.Millisecond):
 		case <-cr.stopc:
 			close(cr.done)
+			plog.Infof("stopped streaming with peer %s (%s reader)", cr.peerID, t)
 			return
 		}
 	}
@@ -313,13 +326,22 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 	cr.mu.Lock()
 	switch t {
 	case streamTypeMsgAppV2:
-		dec = newMsgAppV2Decoder(rc, cr.local, cr.remote)
+		dec = newMsgAppV2Decoder(rc, cr.tr.ID, cr.peerID)
 	case streamTypeMessage:
 		dec = &messageDecoder{r: rc}
 	default:
 		plog.Panicf("unhandled stream type %s", t)
 	}
-	cr.closer = rc
+	select {
+	case <-cr.stopc:
+		cr.mu.Unlock()
+		if err := rc.Close(); err != nil {
+			return err
+		}
+		return io.EOF
+	default:
+		cr.closer = rc
+	}
 	cr.mu.Unlock()
 
 	for {
@@ -329,6 +351,16 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 			cr.close()
 			cr.mu.Unlock()
 			return err
+		}
+
+		receivedBytes.WithLabelValues(types.ID(m.From).String()).Add(float64(m.Size()))
+
+		cr.mu.Lock()
+		paused := cr.paused
+		cr.mu.Unlock()
+
+		if paused {
+			continue
 		}
 
 		if isLinkHeartbeatMessage(m) {
@@ -365,27 +397,21 @@ func (cr *streamReader) stop() {
 	<-cr.done
 }
 
-func (cr *streamReader) isWorking() bool {
-	cr.mu.Lock()
-	defer cr.mu.Unlock()
-	return cr.closer != nil
-}
-
 func (cr *streamReader) dial(t streamType) (io.ReadCloser, error) {
 	u := cr.picker.pick()
 	uu := u
-	uu.Path = path.Join(t.endpoint(), cr.local.String())
+	uu.Path = path.Join(t.endpoint(), cr.tr.ID.String())
 
 	req, err := http.NewRequest("GET", uu.String(), nil)
 	if err != nil {
 		cr.picker.unreachable(u)
-		return nil, fmt.Errorf("failed to make http request to %s (%v)", u, err)
+		return nil, fmt.Errorf("failed to make http request to %v (%v)", u, err)
 	}
-	req.Header.Set("X-Server-From", cr.local.String())
+	req.Header.Set("X-Server-From", cr.tr.ID.String())
 	req.Header.Set("X-Server-Version", version.Version)
 	req.Header.Set("X-Min-Cluster-Version", version.MinClusterVersion)
-	req.Header.Set("X-Etcd-Cluster-ID", cr.cid.String())
-	req.Header.Set("X-Raft-To", cr.remote.String())
+	req.Header.Set("X-Etcd-Cluster-ID", cr.tr.ClusterID.String())
+	req.Header.Set("X-Raft-To", cr.peerID.String())
 
 	setPeerURLsHeader(req, cr.tr.URLs)
 
@@ -408,14 +434,14 @@ func (cr *streamReader) dial(t streamType) (io.ReadCloser, error) {
 	rv := serverVersion(resp.Header)
 	lv := semver.Must(semver.NewVersion(version.Version))
 	if compareMajorMinorVersion(rv, lv) == -1 && !checkStreamSupport(rv, t) {
-		resp.Body.Close()
+		httputil.GracefulClose(resp)
 		cr.picker.unreachable(u)
 		return nil, errUnsupportedStreamType
 	}
 
 	switch resp.StatusCode {
 	case http.StatusGone:
-		resp.Body.Close()
+		httputil.GracefulClose(resp)
 		cr.picker.unreachable(u)
 		err := fmt.Errorf("the member has been permanently removed from the cluster")
 		select {
@@ -426,31 +452,31 @@ func (cr *streamReader) dial(t streamType) (io.ReadCloser, error) {
 	case http.StatusOK:
 		return resp.Body, nil
 	case http.StatusNotFound:
-		resp.Body.Close()
+		httputil.GracefulClose(resp)
 		cr.picker.unreachable(u)
-		return nil, fmt.Errorf("remote member %s could not recognize local member", cr.remote)
+		return nil, fmt.Errorf("peer %s faild to fine local node %s", cr.peerID, cr.tr.ID)
 	case http.StatusPreconditionFailed:
 		b, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
 			cr.picker.unreachable(u)
 			return nil, err
 		}
-		resp.Body.Close()
+		httputil.GracefulClose(resp)
 		cr.picker.unreachable(u)
 
 		switch strings.TrimSuffix(string(b), "\n") {
 		case errIncompatibleVersion.Error():
-			plog.Errorf("request sent was ignored by peer %s (server version incompatible)", cr.remote)
+			plog.Errorf("request sent was ignored by peer %s (server version incompatible)", cr.peerID)
 			return nil, errIncompatibleVersion
 		case errClusterIDMismatch.Error():
-			plog.Errorf("request sent was ignored (cluster ID mismatch: remote[%s]=%s, local=%s)",
-				cr.remote, resp.Header.Get("X-Etcd-Cluster-ID"), cr.cid)
+			plog.Errorf("request sent was ignored (cluster ID mismatch: peer[%s]=%s, local=%s)",
+				cr.peerID, resp.Header.Get("X-Etcd-Cluster-ID"), cr.tr.ClusterID)
 			return nil, errClusterIDMismatch
 		default:
 			return nil, fmt.Errorf("unhandled error %q when precondition failed", string(b))
 		}
 	default:
-		resp.Body.Close()
+		httputil.GracefulClose(resp)
 		cr.picker.unreachable(u)
 		return nil, fmt.Errorf("unhandled http status %d", resp.StatusCode)
 	}
@@ -461,6 +487,18 @@ func (cr *streamReader) close() {
 		cr.closer.Close()
 	}
 	cr.closer = nil
+}
+
+func (cr *streamReader) pause() {
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
+	cr.paused = true
+}
+
+func (cr *streamReader) resume() {
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
+	cr.paused = false
 }
 
 func isClosedConnectionError(err error) bool {
@@ -478,9 +516,4 @@ func checkStreamSupport(v *semver.Version, t streamType) bool {
 		}
 	}
 	return false
-}
-
-func isNetworkTimeoutError(err error) bool {
-	nerr, ok := err.(net.Error)
-	return ok && nerr.Timeout()
 }

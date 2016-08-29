@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,11 @@ package concurrency
 
 import (
 	"errors"
+	"fmt"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	v3 "github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/storage/storagepb"
+	"github.com/coreos/etcd/mvcc/mvccpb"
+	"golang.org/x/net/context"
 )
 
 var (
@@ -29,7 +30,6 @@ var (
 
 type Election struct {
 	client *v3.Client
-	ctx    context.Context
 
 	keyPrefix string
 
@@ -39,8 +39,8 @@ type Election struct {
 }
 
 // NewElection returns a new election on a given key prefix.
-func NewElection(ctx context.Context, client *v3.Client, pfx string) *Election {
-	return &Election{client: client, ctx: ctx, keyPrefix: pfx}
+func NewElection(client *v3.Client, pfx string) *Election {
+	return &Election{client: client, keyPrefix: pfx}
 }
 
 // Campaign puts a value as eligible for the election. It blocks until
@@ -51,22 +51,39 @@ func (e *Election) Campaign(ctx context.Context, val string) error {
 		return serr
 	}
 
-	k, rev, err := NewUniqueKV(ctx, e.client, e.keyPrefix, val, v3.WithLease(s.Lease()))
-	if err == nil {
-		err = waitDeletes(ctx, e.client, e.keyPrefix, v3.WithPrefix(), v3.WithRev(rev-1))
+	k := fmt.Sprintf("%s/%x", e.keyPrefix, s.Lease())
+	txn := e.client.Txn(ctx).If(v3.Compare(v3.CreateRevision(k), "=", 0))
+	txn = txn.Then(v3.OpPut(k, val, v3.WithLease(s.Lease())))
+	txn = txn.Else(v3.OpGet(k))
+	resp, err := txn.Commit()
+	if err != nil {
+		return err
 	}
 
+	e.leaderKey, e.leaderRev, e.leaderSession = k, resp.Header.Revision, s
+	if !resp.Succeeded {
+		kv := resp.Responses[0].GetResponseRange().Kvs[0]
+		e.leaderRev = kv.CreateRevision
+		if string(kv.Value) != val {
+			if err = e.Proclaim(ctx, val); err != nil {
+				e.Resign(ctx)
+				return err
+			}
+		}
+	}
+
+	err = waitDeletes(ctx, e.client, e.keyPrefix, v3.WithPrefix(), v3.WithRev(e.leaderRev-1))
 	if err != nil {
 		// clean up in case of context cancel
 		select {
 		case <-ctx.Done():
-			e.client.Delete(e.ctx, k)
+			e.Resign(e.client.Ctx())
 		default:
+			e.leaderSession = nil
 		}
 		return err
 	}
 
-	e.leaderKey, e.leaderRev, e.leaderSession = k, rev, s
 	return nil
 }
 
@@ -75,7 +92,7 @@ func (e *Election) Proclaim(ctx context.Context, val string) error {
 	if e.leaderSession == nil {
 		return ErrElectionNotLeader
 	}
-	cmp := v3.Compare(v3.CreatedRevision(e.leaderKey), "=", e.leaderRev)
+	cmp := v3.Compare(v3.CreateRevision(e.leaderKey), "=", e.leaderRev)
 	txn := e.client.Txn(ctx).If(cmp)
 	txn = txn.Then(v3.OpPut(e.leaderKey, val, v3.WithLease(e.leaderSession.Lease())))
 	tresp, terr := txn.Commit()
@@ -90,19 +107,19 @@ func (e *Election) Proclaim(ctx context.Context, val string) error {
 }
 
 // Resign lets a leader start a new election.
-func (e *Election) Resign() (err error) {
+func (e *Election) Resign(ctx context.Context) (err error) {
 	if e.leaderSession == nil {
 		return nil
 	}
-	_, err = e.client.Delete(e.ctx, e.leaderKey)
+	_, err = e.client.Delete(ctx, e.leaderKey)
 	e.leaderKey = ""
 	e.leaderSession = nil
 	return err
 }
 
 // Leader returns the leader value for the current election.
-func (e *Election) Leader() (string, error) {
-	resp, err := e.client.Get(e.ctx, e.keyPrefix, v3.WithFirstCreate()...)
+func (e *Election) Leader(ctx context.Context) (string, error) {
+	resp, err := e.client.Get(ctx, e.keyPrefix, v3.WithFirstCreate()...)
 	if err != nil {
 		return "", err
 	} else if len(resp.Kvs) == 0 {
@@ -129,7 +146,7 @@ func (e *Election) observe(ctx context.Context, ch chan<- v3.GetResponse) {
 			return
 		}
 
-		var kv *storagepb.KeyValue
+		var kv *mvccpb.KeyValue
 
 		cctx, cancel := context.WithCancel(ctx)
 		if len(resp.Kvs) == 0 {
@@ -145,7 +162,7 @@ func (e *Election) observe(ctx context.Context, ch chan<- v3.GetResponse) {
 				}
 				// only accept PUTs; a DELETE will make observe() spin
 				for _, ev := range wr.Events {
-					if ev.Type == storagepb.PUT {
+					if ev.Type == mvccpb.PUT {
 						kv = ev.Kv
 						break
 					}
@@ -163,12 +180,12 @@ func (e *Election) observe(ctx context.Context, ch chan<- v3.GetResponse) {
 				return
 			}
 			for _, ev := range wr.Events {
-				if ev.Type == storagepb.DELETE {
+				if ev.Type == mvccpb.DELETE {
 					keyDeleted = true
 					break
 				}
 				resp.Header = &wr.Header
-				resp.Kvs = []*storagepb.KeyValue{ev.Kv}
+				resp.Kvs = []*mvccpb.KeyValue{ev.Kv}
 				select {
 				case ch <- *resp:
 				case <-cctx.Done():

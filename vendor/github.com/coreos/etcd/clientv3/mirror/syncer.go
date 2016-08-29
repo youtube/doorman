@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package mirror implements etcd mirroring operations.
 package mirror
 
 import (
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	"github.com/coreos/etcd/clientv3"
+	"golang.org/x/net/context"
 )
 
 const (
@@ -77,7 +78,7 @@ func (s *syncer) SyncBase(ctx context.Context) (<-chan clientv3.GetResponse, cha
 			// If len(s.prefix) != 0, we will sync key-value space with given prefix.
 			// We then range from the prefix to the next prefix if exists. Or we will
 			// range from the prefix to the end if the next prefix does not exists.
-			opts = append(opts, clientv3.WithPrefix())
+			opts = append(opts, clientv3.WithRange(clientv3.GetPrefixRangeEnd(s.prefix)))
 			key = s.prefix
 		}
 
@@ -105,5 +106,5 @@ func (s *syncer) SyncUpdates(ctx context.Context) clientv3.WatchChan {
 	if s.rev == 0 {
 		panic("unexpected revision = 0. Calling SyncUpdates before SyncBase finishes?")
 	}
-	return s.c.Watch(ctx, s.prefix, clientv3.WithPrefix(), clientv3.WithRev(s.rev))
+	return s.c.Watch(ctx, s.prefix, clientv3.WithPrefix(), clientv3.WithRev(s.rev+1))
 }

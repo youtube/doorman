@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,14 +18,11 @@ package v3rpc
 import (
 	"sort"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/pkg/capnslog"
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
-	"github.com/coreos/etcd/Godeps/_workspace/src/google.golang.org/grpc"
-	"github.com/coreos/etcd/Godeps/_workspace/src/google.golang.org/grpc/codes"
 	"github.com/coreos/etcd/etcdserver"
+	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
-	"github.com/coreos/etcd/lease"
-	"github.com/coreos/etcd/storage"
+	"github.com/coreos/pkg/capnslog"
+	"golang.org/x/net/context"
 )
 
 var (
@@ -37,20 +34,12 @@ var (
 )
 
 type kvServer struct {
-	clusterID int64
-	memberID  int64
-	raftTimer etcdserver.RaftTimer
-
-	kv etcdserver.RaftKV
+	hdr header
+	kv  etcdserver.RaftKV
 }
 
 func NewKVServer(s *etcdserver.EtcdServer) pb.KVServer {
-	return &kvServer{
-		clusterID: int64(s.Cluster().ID()),
-		memberID:  int64(s.ID()),
-		raftTimer: s,
-		kv:        s,
-	}
+	return &kvServer{hdr: newHeader(s), kv: s}
 }
 
 func (s *kvServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeResponse, error) {
@@ -66,7 +55,7 @@ func (s *kvServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeResp
 	if resp.Header == nil {
 		plog.Panic("unexpected nil resp.Header")
 	}
-	s.fillInHeader(resp.Header)
+	s.hdr.fill(resp.Header)
 	return resp, err
 }
 
@@ -83,7 +72,7 @@ func (s *kvServer) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse, 
 	if resp.Header == nil {
 		plog.Panic("unexpected nil resp.Header")
 	}
-	s.fillInHeader(resp.Header)
+	s.hdr.fill(resp.Header)
 	return resp, err
 }
 
@@ -100,7 +89,7 @@ func (s *kvServer) DeleteRange(ctx context.Context, r *pb.DeleteRangeRequest) (*
 	if resp.Header == nil {
 		plog.Panic("unexpected nil resp.Header")
 	}
-	s.fillInHeader(resp.Header)
+	s.hdr.fill(resp.Header)
 	return resp, err
 }
 
@@ -117,7 +106,7 @@ func (s *kvServer) Txn(ctx context.Context, r *pb.TxnRequest) (*pb.TxnResponse, 
 	if resp.Header == nil {
 		plog.Panic("unexpected nil resp.Header")
 	}
-	s.fillInHeader(resp.Header)
+	s.hdr.fill(resp.Header)
 	return resp, err
 }
 
@@ -130,60 +119,44 @@ func (s *kvServer) Compact(ctx context.Context, r *pb.CompactionRequest) (*pb.Co
 	if resp.Header == nil {
 		plog.Panic("unexpected nil resp.Header")
 	}
-	s.fillInHeader(resp.Header)
+	s.hdr.fill(resp.Header)
 	return resp, nil
-}
-
-func (s *kvServer) Hash(ctx context.Context, r *pb.HashRequest) (*pb.HashResponse, error) {
-	resp, err := s.kv.Hash(ctx, r)
-	if err != nil {
-		return nil, togRPCError(err)
-	}
-	s.fillInHeader(resp.Header)
-	return resp, nil
-}
-
-// fillInHeader populates pb.ResponseHeader from kvServer, except Revision.
-func (s *kvServer) fillInHeader(h *pb.ResponseHeader) {
-	h.ClusterId = uint64(s.clusterID)
-	h.MemberId = uint64(s.memberID)
-	h.RaftTerm = s.raftTimer.Term()
 }
 
 func checkRangeRequest(r *pb.RangeRequest) error {
 	if len(r.Key) == 0 {
-		return ErrEmptyKey
+		return rpctypes.ErrGRPCEmptyKey
 	}
 	return nil
 }
 
 func checkPutRequest(r *pb.PutRequest) error {
 	if len(r.Key) == 0 {
-		return ErrEmptyKey
+		return rpctypes.ErrGRPCEmptyKey
 	}
 	return nil
 }
 
 func checkDeleteRequest(r *pb.DeleteRangeRequest) error {
 	if len(r.Key) == 0 {
-		return ErrEmptyKey
+		return rpctypes.ErrGRPCEmptyKey
 	}
 	return nil
 }
 
 func checkTxnRequest(r *pb.TxnRequest) error {
 	if len(r.Compare) > MaxOpsPerTxn || len(r.Success) > MaxOpsPerTxn || len(r.Failure) > MaxOpsPerTxn {
-		return ErrTooManyOps
+		return rpctypes.ErrGRPCTooManyOps
 	}
 
 	for _, c := range r.Compare {
 		if len(c.Key) == 0 {
-			return ErrEmptyKey
+			return rpctypes.ErrGRPCEmptyKey
 		}
 	}
 
 	for _, u := range r.Success {
-		if err := checkRequestUnion(u); err != nil {
+		if err := checkRequestOp(u); err != nil {
 			return err
 		}
 	}
@@ -192,23 +165,19 @@ func checkTxnRequest(r *pb.TxnRequest) error {
 	}
 
 	for _, u := range r.Failure {
-		if err := checkRequestUnion(u); err != nil {
+		if err := checkRequestOp(u); err != nil {
 			return err
 		}
 	}
-	if err := checkRequestDupKeys(r.Failure); err != nil {
-		return err
-	}
-
-	return nil
+	return checkRequestDupKeys(r.Failure)
 }
 
-// checkRequestDupKeys gives ErrDuplicateKey if the same key is modified twice
-func checkRequestDupKeys(reqs []*pb.RequestUnion) error {
+// checkRequestDupKeys gives rpctypes.ErrGRPCDuplicateKey if the same key is modified twice
+func checkRequestDupKeys(reqs []*pb.RequestOp) error {
 	// check put overlap
 	keys := make(map[string]struct{})
 	for _, requ := range reqs {
-		tv, ok := requ.Request.(*pb.RequestUnion_RequestPut)
+		tv, ok := requ.Request.(*pb.RequestOp_RequestPut)
 		if !ok {
 			continue
 		}
@@ -216,11 +185,10 @@ func checkRequestDupKeys(reqs []*pb.RequestUnion) error {
 		if preq == nil {
 			continue
 		}
-		key := string(preq.Key)
-		if _, ok := keys[key]; ok {
-			return ErrDuplicateKey
+		if _, ok := keys[string(preq.Key)]; ok {
+			return rpctypes.ErrGRPCDuplicateKey
 		}
-		keys[key] = struct{}{}
+		keys[string(preq.Key)] = struct{}{}
 	}
 
 	// no need to check deletes if no puts; delete overlaps are permitted
@@ -237,7 +205,7 @@ func checkRequestDupKeys(reqs []*pb.RequestUnion) error {
 
 	// check put overlap with deletes
 	for _, requ := range reqs {
-		tv, ok := requ.Request.(*pb.RequestUnion_RequestDeleteRange)
+		tv, ok := requ.Request.(*pb.RequestOp_RequestDeleteRange)
 		if !ok {
 			continue
 		}
@@ -245,17 +213,16 @@ func checkRequestDupKeys(reqs []*pb.RequestUnion) error {
 		if dreq == nil {
 			continue
 		}
-		key := string(dreq.Key)
 		if dreq.RangeEnd == nil {
-			if _, found := keys[key]; found {
-				return ErrDuplicateKey
+			if _, found := keys[string(dreq.Key)]; found {
+				return rpctypes.ErrGRPCDuplicateKey
 			}
 		} else {
-			lo := sort.SearchStrings(sortedKeys, key)
+			lo := sort.SearchStrings(sortedKeys, string(dreq.Key))
 			hi := sort.SearchStrings(sortedKeys, string(dreq.RangeEnd))
 			if lo != hi {
 				// element between lo and hi => overlap
-				return ErrDuplicateKey
+				return rpctypes.ErrGRPCDuplicateKey
 			}
 		}
 	}
@@ -263,40 +230,24 @@ func checkRequestDupKeys(reqs []*pb.RequestUnion) error {
 	return nil
 }
 
-func checkRequestUnion(u *pb.RequestUnion) error {
+func checkRequestOp(u *pb.RequestOp) error {
 	// TODO: ensure only one of the field is set.
 	switch uv := u.Request.(type) {
-	case *pb.RequestUnion_RequestRange:
+	case *pb.RequestOp_RequestRange:
 		if uv.RequestRange != nil {
 			return checkRangeRequest(uv.RequestRange)
 		}
-	case *pb.RequestUnion_RequestPut:
+	case *pb.RequestOp_RequestPut:
 		if uv.RequestPut != nil {
 			return checkPutRequest(uv.RequestPut)
 		}
-	case *pb.RequestUnion_RequestDeleteRange:
+	case *pb.RequestOp_RequestDeleteRange:
 		if uv.RequestDeleteRange != nil {
 			return checkDeleteRequest(uv.RequestDeleteRange)
 		}
 	default:
-		// empty union
+		// empty op
 		return nil
 	}
 	return nil
-}
-
-func togRPCError(err error) error {
-	switch err {
-	case storage.ErrCompacted:
-		return ErrCompacted
-	case storage.ErrFutureRev:
-		return ErrFutureRev
-	case lease.ErrLeaseNotFound:
-		return ErrLeaseNotFound
-	// TODO: handle error from raft and timeout
-	case etcdserver.ErrRequestTooLarge:
-		return ErrRequestTooLarge
-	default:
-		return grpc.Errorf(codes.Internal, err.Error())
-	}
 }

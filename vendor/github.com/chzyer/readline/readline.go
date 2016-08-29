@@ -1,19 +1,11 @@
 package readline
 
-import (
-	"io"
-	"os"
-)
+import "io"
 
 type Instance struct {
 	Config    *Config
 	Terminal  *Terminal
 	Operation *Operation
-}
-
-type FdReader interface {
-	io.Reader
-	Fd() uintptr
 }
 
 type Config struct {
@@ -39,17 +31,24 @@ type Config struct {
 	InterruptPrompt string
 	EOFPrompt       string
 
-	Stdin  FdReader
+	FuncGetWidth func() int
+
+	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
 
-	MaskRune rune
+	EnableMask bool
+	MaskRune   rune
 
+	// erase the editing line after user submited it
+	// it use in IM usually.
 	UniqueEditLine bool
 
 	// force use interactive even stdout is not a tty
-	StdinFd             int
-	StdoutFd            int
+	FuncIsTerminal      func() bool
+	FuncMakeRaw         func() error
+	FuncExitRaw         func() error
+	FuncOnWidthChanged  func(func())
 	ForceUseInteractive bool
 
 	// private fields
@@ -62,7 +61,7 @@ func (c *Config) useInteractive() bool {
 	if c.ForceUseInteractive {
 		return true
 	}
-	return IsTerminal(c.StdoutFd) && IsTerminal(c.StdinFd)
+	return c.FuncIsTerminal()
 }
 
 func (c *Config) Init() error {
@@ -71,19 +70,13 @@ func (c *Config) Init() error {
 	}
 	c.inited = true
 	if c.Stdin == nil {
-		c.Stdin = os.Stdin
+		c.Stdin = Stdin
 	}
 	if c.Stdout == nil {
 		c.Stdout = Stdout
 	}
 	if c.Stderr == nil {
 		c.Stderr = Stderr
-	}
-	if c.StdinFd == 0 {
-		c.StdinFd = StdinFd
-	}
-	if c.StdoutFd == 0 {
-		c.StdoutFd = StdoutFd
 	}
 	if c.HistoryLimit == 0 {
 		c.HistoryLimit = 500
@@ -98,6 +91,23 @@ func (c *Config) Init() error {
 		c.EOFPrompt = "^D"
 	} else if c.EOFPrompt == "\n" {
 		c.EOFPrompt = ""
+	}
+
+	if c.FuncGetWidth == nil {
+		c.FuncGetWidth = GetScreenWidth
+	}
+	if c.FuncIsTerminal == nil {
+		c.FuncIsTerminal = DefaultIsTerminal
+	}
+	rm := new(RawMode)
+	if c.FuncMakeRaw == nil {
+		c.FuncMakeRaw = rm.Enter
+	}
+	if c.FuncExitRaw == nil {
+		c.FuncExitRaw = rm.Exit
+	}
+	if c.FuncOnWidthChanged == nil {
+		c.FuncOnWidthChanged = DefaultOnWidthChanged
 	}
 
 	return nil
@@ -130,6 +140,10 @@ func New(prompt string) (*Instance, error) {
 	return NewEx(&Config{Prompt: prompt})
 }
 
+func (i *Instance) ResetHistory() {
+	i.Operation.ResetHistory()
+}
+
 func (i *Instance) SetPrompt(s string) {
 	i.Operation.SetPrompt(s)
 }
@@ -138,7 +152,7 @@ func (i *Instance) SetMaskRune(r rune) {
 	i.Operation.SetMaskRune(r)
 }
 
-// change hisotry persistence in runtime
+// change history persistence in runtime
 func (i *Instance) SetHistoryPath(p string) {
 	i.Operation.SetHistoryPath(p)
 }
@@ -179,6 +193,24 @@ func (i *Instance) ReadPassword(prompt string) ([]byte, error) {
 	return i.Operation.Password(prompt)
 }
 
+type Result struct {
+	Line  string
+	Error error
+}
+
+func (l *Result) CanContinue() bool {
+	return len(l.Line) != 0 && l.Error == ErrInterrupt
+}
+
+func (l *Result) CanBreak() bool {
+	return !l.CanContinue() && l.Error != nil
+}
+
+func (i *Instance) Line() *Result {
+	ret, err := i.Readline()
+	return &Result{ret, err}
+}
+
 // err is one of (nil, io.EOF, readline.ErrInterrupt)
 func (i *Instance) Readline() (string, error) {
 	return i.Operation.String()
@@ -200,6 +232,13 @@ func (i *Instance) Close() error {
 	}
 	i.Operation.Close()
 	return nil
+}
+func (i *Instance) Clean() {
+	i.Operation.Clean()
+}
+
+func (i *Instance) Write(b []byte) (int, error) {
+	return i.Stdout().Write(b)
 }
 
 func (i *Instance) SetConfig(cfg *Config) *Config {

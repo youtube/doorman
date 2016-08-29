@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,48 +11,17 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package concurrency
 
 import (
 	"fmt"
 	"math"
-	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	v3 "github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/storage/storagepb"
+	"github.com/coreos/etcd/mvcc/mvccpb"
+	"golang.org/x/net/context"
 )
-
-// NewUniqueKey creates a new key from a given prefix.
-func NewUniqueKey(ctx context.Context, kv v3.KV, pfx string, opts ...v3.OpOption) (string, int64, error) {
-	return NewUniqueKV(ctx, kv, pfx, "", opts...)
-}
-
-func NewUniqueKV(ctx context.Context, kv v3.KV, pfx, val string, opts ...v3.OpOption) (string, int64, error) {
-	for {
-		newKey := fmt.Sprintf("%s/%v", pfx, time.Now().UnixNano())
-		put := v3.OpPut(newKey, val, opts...)
-		cmp := v3.Compare(v3.ModifiedRevision(newKey), "=", 0)
-		resp, err := kv.Txn(ctx).If(cmp).Then(put).Commit()
-		if err != nil {
-			return "", 0, err
-		}
-		if !resp.Succeeded {
-			continue
-		}
-		return newKey, resp.Header.Revision, nil
-	}
-}
-
-func waitUpdate(ctx context.Context, client *v3.Client, key string, opts ...v3.OpOption) error {
-	cctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	wresp, ok := <-client.Watch(cctx, key, opts...)
-	if !ok {
-		return ctx.Err()
-	}
-	return wresp.Err()
-}
 
 func waitDelete(ctx context.Context, client *v3.Client, key string, rev int64) error {
 	cctx, cancel := context.WithCancel(ctx)
@@ -60,7 +29,7 @@ func waitDelete(ctx context.Context, client *v3.Client, key string, rev int64) e
 	wch := client.Watch(cctx, key, v3.WithRev(rev))
 	for wr := range wch {
 		for _, ev := range wr.Events {
-			if ev.Type == storagepb.DELETE {
+			if ev.Type == mvccpb.DELETE {
 				return nil
 			}
 		}
@@ -73,7 +42,7 @@ func waitDelete(ctx context.Context, client *v3.Client, key string, rev int64) e
 
 // waitDeletes efficiently waits until all keys matched by Get(key, opts...) are deleted
 func waitDeletes(ctx context.Context, client *v3.Client, key string, opts ...v3.OpOption) error {
-	getOpts := []v3.OpOption{v3.WithSort(v3.SortByCreatedRev, v3.SortAscend)}
+	getOpts := []v3.OpOption{v3.WithSort(v3.SortByCreateRevision, v3.SortAscend)}
 	getOpts = append(getOpts, opts...)
 	resp, err := client.Get(ctx, key, getOpts...)
 	maxRev := int64(math.MaxInt64)

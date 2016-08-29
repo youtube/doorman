@@ -1,11 +1,10 @@
 package readline
 
 import (
+	"bufio"
 	"bytes"
 	"io"
 	"strings"
-
-	"github.com/chzyer/readline/runes"
 )
 
 type runeBufferBck struct {
@@ -18,13 +17,18 @@ type RuneBuffer struct {
 	idx    int
 	prompt []rune
 	w      io.Writer
-	mask   rune
 
-	cleanInScreen bool
-	interactive   bool
-	cfg           *Config
+	hadClean    bool
+	interactive bool
+	cfg         *Config
+
+	width int
 
 	bck *runeBufferBck
+}
+
+func (r *RuneBuffer) OnWidthChange(newWidth int) {
+	r.width = newWidth
 }
 
 func (r *RuneBuffer) Backup() {
@@ -41,12 +45,12 @@ func (r *RuneBuffer) Restore() {
 	})
 }
 
-func NewRuneBuffer(w io.Writer, prompt string, mask rune, cfg *Config) *RuneBuffer {
+func NewRuneBuffer(w io.Writer, prompt string, cfg *Config, width int) *RuneBuffer {
 	rb := &RuneBuffer{
 		w:           w,
-		mask:        mask,
 		interactive: cfg.useInteractive(),
 		cfg:         cfg,
+		width:       width,
 	}
 	rb.SetPrompt(prompt)
 	return rb
@@ -58,7 +62,7 @@ func (r *RuneBuffer) SetConfig(cfg *Config) {
 }
 
 func (r *RuneBuffer) SetMask(m rune) {
-	r.mask = m
+	r.cfg.MaskRune = m
 }
 
 func (r *RuneBuffer) CurrentWidth(x int) int {
@@ -255,6 +259,28 @@ func (r *RuneBuffer) MoveToNextWord() {
 	})
 }
 
+func (r *RuneBuffer) MoveToEndWord() {
+	r.Refresh(func() {
+		// already at the end, so do nothing
+		if r.idx == len(r.buf) {
+			return
+		}
+		// if we are at the end of a word already, go to next
+		if !IsWordBreak(r.buf[r.idx]) && IsWordBreak(r.buf[r.idx+1]) {
+			r.idx++
+		}
+
+		// keep going until at the end of a word
+		for i := r.idx + 1; i < len(r.buf); i++ {
+			if IsWordBreak(r.buf[i]) && !IsWordBreak(r.buf[i-1]) {
+				r.idx = i - 1
+				return
+			}
+		}
+		r.idx = len(r.buf)
+	})
+}
+
 func (r *RuneBuffer) BackEscapeWord() {
 	r.Refresh(func() {
 		if r.idx == 0 {
@@ -294,8 +320,12 @@ func (r *RuneBuffer) MoveToLineEnd() {
 	})
 }
 
-func (r *RuneBuffer) LineCount() int {
-	return LineCount(r.cfg.StdoutFd, runes.WidthAll(r.buf)+r.PromptLen())
+func (r *RuneBuffer) LineCount(width int) int {
+	if width == -1 {
+		width = r.width
+	}
+	return LineCount(width,
+		runes.WidthAll(r.buf)+r.PromptLen())
 }
 
 func (r *RuneBuffer) MoveTo(ch rune, prevChar, reverse bool) (success bool) {
@@ -327,27 +357,25 @@ func (r *RuneBuffer) MoveTo(ch rune, prevChar, reverse bool) (success bool) {
 	return
 }
 
-func (r *RuneBuffer) IdxLine() int {
-	totalWidth := runes.WidthAll(r.buf[:r.idx]) + r.PromptLen()
-	w := getWidth(r.cfg.StdoutFd)
-	if w <= 0 {
-		return -1
+func (r *RuneBuffer) isInLineEdge() bool {
+	if isWindows {
+		return false
 	}
-	line := totalWidth / w
+	sp := r.getSplitByLine(r.buf)
+	return len(sp[len(sp)-1]) == 0
+}
 
-	// if cursor is in last colmun and not any character behind it
-	// the cursor will in the first line, otherwise will in the second line
-	// this situation only occurs in golang's Stdout
-	// TODO: figure out why
-	if totalWidth%w == 0 && len(r.buf) == r.idx && !isWindows {
-		line--
-	}
+func (r *RuneBuffer) getSplitByLine(rs []rune) []string {
+	return SplitByLine(r.PromptLen(), r.width, rs)
+}
 
-	return line
+func (r *RuneBuffer) IdxLine(width int) int {
+	sp := r.getSplitByLine(r.buf[:r.idx])
+	return len(sp) - 1
 }
 
 func (r *RuneBuffer) CursorLineCount() int {
-	return r.LineCount() - r.IdxLine()
+	return r.LineCount(r.width) - r.IdxLine(r.width)
 }
 
 func (r *RuneBuffer) Refresh(f func()) {
@@ -361,23 +389,35 @@ func (r *RuneBuffer) Refresh(f func()) {
 	if f != nil {
 		f()
 	}
+	r.print()
+}
+
+func (r *RuneBuffer) print() {
 	r.w.Write(r.output())
-	r.cleanInScreen = false
+	r.hadClean = false
 }
 
 func (r *RuneBuffer) output() []byte {
 	buf := bytes.NewBuffer(nil)
 	buf.WriteString(string(r.prompt))
-	if r.mask != 0 && len(r.buf) > 0 {
-		buf.Write([]byte(strings.Repeat(string(r.mask), len(r.buf)-1)))
+	if r.cfg.EnableMask && len(r.buf) > 0 {
+		buf.Write([]byte(strings.Repeat(string(r.cfg.MaskRune), len(r.buf)-1)))
 		if r.buf[len(r.buf)-1] == '\n' {
 			buf.Write([]byte{'\n'})
 		} else {
-			buf.Write([]byte(string(r.mask)))
+			buf.Write([]byte(string(r.cfg.MaskRune)))
 		}
+		if len(r.buf) > r.idx {
+			buf.Write(runes.Backspace(r.buf[r.idx:]))
+		}
+
 	} else {
 		buf.Write([]byte(string(r.buf)))
+		if r.isInLineEdge() {
+			buf.Write([]byte(" \b"))
+		}
 	}
+
 	if len(r.buf) > r.idx {
 		buf.Write(runes.Backspace(r.buf[r.idx:]))
 	}
@@ -431,27 +471,30 @@ func (r *RuneBuffer) SetPrompt(prompt string) {
 	r.prompt = []rune(prompt)
 }
 
-func (r *RuneBuffer) cleanOutput() []byte {
-	buf := bytes.NewBuffer(nil)
+func (r *RuneBuffer) cleanOutput(w io.Writer, idxLine int) {
+	buf := bufio.NewWriter(w)
 	buf.Write([]byte("\033[J")) // just like ^k :)
 
-	idxLine := r.IdxLine()
-
 	if idxLine == 0 {
-		buf.WriteString("\033[2K\r")
-		return buf.Bytes()
+		io.WriteString(buf, "\033[2K\r")
+	} else {
+		for i := 0; i < idxLine; i++ {
+			io.WriteString(buf, "\033[2K\r\033[A")
+		}
+		io.WriteString(buf, "\033[2K\r")
 	}
-	for i := 0; i < idxLine; i++ {
-		buf.WriteString("\033[2K\r\033[A")
-	}
-	buf.WriteString("\033[2K\r")
-	return buf.Bytes()
+	buf.Flush()
+	return
 }
 
 func (r *RuneBuffer) Clean() {
-	if r.cleanInScreen || !r.interactive {
+	r.clean(r.IdxLine(r.width))
+}
+
+func (r *RuneBuffer) clean(idxLine int) {
+	if r.hadClean || !r.interactive {
 		return
 	}
-	r.cleanInScreen = true
-	r.w.Write(r.cleanOutput())
+	r.hadClean = true
+	r.cleanOutput(r.w, idxLine)
 }

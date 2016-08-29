@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,12 +50,15 @@ type ServerConfig struct {
 	ElectionTicks    int
 	BootstrapTimeout time.Duration
 
-	V3demo                  bool
 	AutoCompactionRetention int
+	QuotaBackendBytes       int64
 
 	StrictReconfigCheck bool
 
 	EnablePprof bool
+
+	// ClientCertAuthEnabled is true when cert has been signed by the client CA.
+	ClientCertAuthEnabled bool
 }
 
 // VerifyBootstrap sanity-checks the initial config for bootstrap case
@@ -132,6 +135,10 @@ func (c *ServerConfig) ReqTimeout() time.Duration {
 	// 5s for queue waiting, computation and disk IO delay
 	// + 2 * election timeout for possible leader election
 	return 5*time.Second + 2*time.Duration(c.ElectionTicks)*time.Duration(c.TickMs)*time.Millisecond
+}
+
+func (c *ServerConfig) electionTimeout() time.Duration {
+	return time.Duration(c.ElectionTicks) * time.Duration(c.TickMs) * time.Millisecond
 }
 
 func (c *ServerConfig) peerDialTimeout() time.Duration {

@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coreos/etcd/etcdserver/membership"
+	"github.com/coreos/etcd/pkg/mock/mockstorage"
 	"github.com/coreos/etcd/pkg/pbutil"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/raft"
@@ -70,9 +72,9 @@ func TestGetIDs(t *testing.T) {
 }
 
 func TestCreateConfigChangeEnts(t *testing.T) {
-	m := Member{
+	m := membership.Member{
 		ID:             types.ID(1),
-		RaftAttributes: RaftAttributes{PeerURLs: []string{"http://localhost:7001", "http://localhost:2380"}},
+		RaftAttributes: membership.RaftAttributes{PeerURLs: []string{"http://localhost:2380"}},
 	}
 	ctx, err := json.Marshal(m)
 	if err != nil {
@@ -151,23 +153,23 @@ func TestCreateConfigChangeEnts(t *testing.T) {
 
 func TestStopRaftWhenWaitingForApplyDone(t *testing.T) {
 	n := newNopReadyNode()
-	r := raftNode{
+	srv := &EtcdServer{r: raftNode{
 		Node:        n,
-		storage:     newStorageRecorder(""),
+		storage:     mockstorage.NewStorageRecorder(""),
 		raftStorage: raft.NewMemoryStorage(),
 		transport:   rafthttp.NewNopTransporter(),
-	}
-	r.start(&EtcdServer{r: r})
+	}}
+	srv.r.start(srv)
 	n.readyc <- raft.Ready{}
 	select {
-	case <-r.applyc:
+	case <-srv.r.applyc:
 	case <-time.After(time.Second):
 		t.Fatalf("failed to receive apply struct")
 	}
 
-	r.stopped <- struct{}{}
+	srv.r.stopped <- struct{}{}
 	select {
-	case <-r.done:
+	case <-srv.r.done:
 	case <-time.After(time.Second):
 		t.Fatalf("failed to stop raft loop")
 	}

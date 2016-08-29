@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,61 +15,46 @@
 package transport
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
-	"io/ioutil"
+	"math/big"
 	"net"
-	"net/http"
+	"os"
+	"path"
+	"strings"
 	"time"
+
+	"github.com/coreos/etcd/pkg/fileutil"
+	"github.com/coreos/etcd/pkg/tlsutil"
 )
 
-func NewListener(addr string, scheme string, info TLSInfo) (net.Listener, error) {
-	nettype := "tcp"
-	if scheme == "unix" {
+func NewListener(addr string, scheme string, tlscfg *tls.Config) (l net.Listener, err error) {
+	if scheme == "unix" || scheme == "unixs" {
 		// unix sockets via unix://laddr
-		nettype = scheme
+		l, err = NewUnixListener(addr)
+	} else {
+		l, err = net.Listen("tcp", addr)
 	}
 
-	l, err := net.Listen(nettype, addr)
 	if err != nil {
 		return nil, err
 	}
 
-	if scheme == "https" {
-		if info.Empty() {
+	if scheme == "https" || scheme == "unixs" {
+		if tlscfg == nil {
 			return nil, fmt.Errorf("cannot listen on TLS for %s: KeyFile and CertFile are not presented", scheme+"://"+addr)
 		}
-		cfg, err := info.ServerConfig()
-		if err != nil {
-			return nil, err
-		}
 
-		l = tls.NewListener(l, cfg)
+		l = tls.NewListener(l, tlscfg)
 	}
 
 	return l, nil
-}
-
-func NewTransport(info TLSInfo, dialtimeoutd time.Duration) (*http.Transport, error) {
-	cfg, err := info.ClientConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	t := &http.Transport{
-		Dial: (&net.Dialer{
-			Timeout: dialtimeoutd,
-			// value taken from http.DefaultTransport
-			KeepAlive: 30 * time.Second,
-		}).Dial,
-		// value taken from http.DefaultTransport
-		TLSHandshakeTimeout: 10 * time.Second,
-		TLSClientConfig:     cfg,
-	}
-
-	return t, nil
 }
 
 type TLSInfo struct {
@@ -78,6 +63,11 @@ type TLSInfo struct {
 	CAFile         string
 	TrustedCAFile  string
 	ClientCertAuth bool
+
+	// ServerName ensures the cert matches the given host in case of discovery / virtual hosting
+	ServerName string
+
+	selfCert bool
 
 	// parseFunc exists to simplify testing. Typically, parseFunc
 	// should be left nil. In that case, tls.X509KeyPair will be used.
@@ -92,34 +82,92 @@ func (info TLSInfo) Empty() bool {
 	return info.CertFile == "" && info.KeyFile == ""
 }
 
+func SelfCert(dirpath string, hosts []string) (info TLSInfo, err error) {
+	if err = fileutil.TouchDirAll(dirpath); err != nil {
+		return
+	}
+
+	certPath := path.Join(dirpath, "cert.pem")
+	keyPath := path.Join(dirpath, "key.pem")
+	_, errcert := os.Stat(certPath)
+	_, errkey := os.Stat(keyPath)
+	if errcert == nil && errkey == nil {
+		info.CertFile = certPath
+		info.KeyFile = keyPath
+		info.selfCert = true
+		return
+	}
+
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+	if err != nil {
+		return
+	}
+
+	tmpl := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject:      pkix.Name{Organization: []string{"etcd"}},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(365 * (24 * time.Hour)),
+
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+
+	for _, host := range hosts {
+		if ip := net.ParseIP(host); ip != nil {
+			tmpl.IPAddresses = append(tmpl.IPAddresses, ip)
+		} else {
+			tmpl.DNSNames = append(tmpl.DNSNames, strings.Split(host, ":")[0])
+		}
+	}
+
+	priv, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+	if err != nil {
+		return
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &priv.PublicKey, priv)
+	if err != nil {
+		return
+	}
+
+	certOut, err := os.Create(certPath)
+	if err != nil {
+		return
+	}
+	pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+	certOut.Close()
+
+	b, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return
+	}
+	keyOut, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return
+	}
+	pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: b})
+	keyOut.Close()
+
+	return SelfCert(dirpath, hosts)
+}
+
 func (info TLSInfo) baseConfig() (*tls.Config, error) {
 	if info.KeyFile == "" || info.CertFile == "" {
 		return nil, fmt.Errorf("KeyFile and CertFile must both be present[key: %v, cert: %v]", info.KeyFile, info.CertFile)
 	}
 
-	cert, err := ioutil.ReadFile(info.CertFile)
-	if err != nil {
-		return nil, err
-	}
-
-	key, err := ioutil.ReadFile(info.KeyFile)
-	if err != nil {
-		return nil, err
-	}
-
-	parseFunc := info.parseFunc
-	if parseFunc == nil {
-		parseFunc = tls.X509KeyPair
-	}
-
-	tlsCert, err := parseFunc(cert, key)
+	tlsCert, err := tlsutil.NewCert(info.CertFile, info.KeyFile, info.parseFunc)
 	if err != nil {
 		return nil, err
 	}
 
 	cfg := &tls.Config{
-		Certificates: []tls.Certificate{tlsCert},
-		MinVersion:   tls.VersionTLS10,
+		Certificates: []tls.Certificate{*tlsCert},
+		MinVersion:   tls.VersionTLS12,
+		ServerName:   info.ServerName,
 	}
 	return cfg, nil
 }
@@ -150,7 +198,7 @@ func (info TLSInfo) ServerConfig() (*tls.Config, error) {
 
 	CAFiles := info.cafiles()
 	if len(CAFiles) > 0 {
-		cp, err := newCertPool(CAFiles)
+		cp, err := tlsutil.NewCertPool(CAFiles)
 		if err != nil {
 			return nil, err
 		}
@@ -171,43 +219,50 @@ func (info TLSInfo) ClientConfig() (*tls.Config, error) {
 			return nil, err
 		}
 	} else {
-		cfg = &tls.Config{}
+		cfg = &tls.Config{ServerName: info.ServerName}
 	}
 
 	CAFiles := info.cafiles()
 	if len(CAFiles) > 0 {
-		cfg.RootCAs, err = newCertPool(CAFiles)
+		cfg.RootCAs, err = tlsutil.NewCertPool(CAFiles)
 		if err != nil {
 			return nil, err
 		}
+		// if given a CA, trust any host with a cert signed by the CA
+		cfg.ServerName = ""
 	}
 
+	if info.selfCert {
+		cfg.InsecureSkipVerify = true
+	}
 	return cfg, nil
 }
 
-// newCertPool creates x509 certPool with provided CA files.
-func newCertPool(CAFiles []string) (*x509.CertPool, error) {
-	certPool := x509.NewCertPool()
-
-	for _, CAFile := range CAFiles {
-		pemByte, err := ioutil.ReadFile(CAFile)
-		if err != nil {
-			return nil, err
-		}
-
-		for {
-			var block *pem.Block
-			block, pemByte = pem.Decode(pemByte)
-			if block == nil {
-				break
-			}
-			cert, err := x509.ParseCertificate(block.Bytes)
-			if err != nil {
-				return nil, err
-			}
-			certPool.AddCert(cert)
-		}
+// ShallowCopyTLSConfig copies *tls.Config. This is only
+// work-around for go-vet tests, which complains
+//
+//   assignment copies lock value to p: crypto/tls.Config contains sync.Once contains sync.Mutex
+//
+// Keep up-to-date with 'go/src/crypto/tls/common.go'
+func ShallowCopyTLSConfig(cfg *tls.Config) *tls.Config {
+	ncfg := tls.Config{
+		Time:                     cfg.Time,
+		Certificates:             cfg.Certificates,
+		NameToCertificate:        cfg.NameToCertificate,
+		GetCertificate:           cfg.GetCertificate,
+		RootCAs:                  cfg.RootCAs,
+		NextProtos:               cfg.NextProtos,
+		ServerName:               cfg.ServerName,
+		ClientAuth:               cfg.ClientAuth,
+		ClientCAs:                cfg.ClientCAs,
+		InsecureSkipVerify:       cfg.InsecureSkipVerify,
+		CipherSuites:             cfg.CipherSuites,
+		PreferServerCipherSuites: cfg.PreferServerCipherSuites,
+		SessionTicketKey:         cfg.SessionTicketKey,
+		ClientSessionCache:       cfg.ClientSessionCache,
+		MinVersion:               cfg.MinVersion,
+		MaxVersion:               cfg.MaxVersion,
+		CurvePreferences:         cfg.CurvePreferences,
 	}
-
-	return certPool, nil
+	return &ncfg
 }
