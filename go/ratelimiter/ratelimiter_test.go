@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"doorman/go/client/doorman"
+	"github.com/flipkart-incubator/doorman/go/client/doorman"
 	"golang.org/x/net/context"
 )
 

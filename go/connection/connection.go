@@ -20,11 +20,11 @@ package connection
 import (
 	"time"
 
-	"doorman/go/timeutil"
+	"github.com/flipkart-incubator/doorman/go/timeutil"
 	log "github.com/golang/glog"
 	rpc "google.golang.org/grpc"
 
-	pb "doorman/proto/doorman"
+	pb "github.com/flipkart-incubator/doorman/proto/doorman"
 )
 
 const (

@@ -25,9 +25,9 @@ import (
 	log "github.com/golang/glog"
 	rpc "google.golang.org/grpc"
 
-	server "doorman/go/server/doorman"
+	server "github.com/flipkart-incubator/doorman/go/server/doorman"
 
-	pb "doorman/proto/doorman"
+	pb "github.com/flipkart-incubator/doorman/proto/doorman"
 )
 
 var (

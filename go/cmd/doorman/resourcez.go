@@ -24,7 +24,7 @@ import (
 
 	log "github.com/golang/glog"
 
-	"doorman/go/server/doorman"
+	"github.com/flipkart-incubator/doorman/go/server/doorman"
 )
 
 var (

@@ -23,7 +23,7 @@ import (
 	rpc "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
-	pb "doorman/proto/doorman"
+	pb "github.com/flipkart-incubator/doorman/proto/doorman"
 )
 
 func TestValidateGetCapacityRequest(t *testing.T) {

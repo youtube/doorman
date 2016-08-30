@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	pb "doorman/proto/doorman"
+	pb "github.com/flipkart-incubator/doorman/proto/doorman"
 )
 
 const (

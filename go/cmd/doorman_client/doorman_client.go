@@ -27,7 +27,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"doorman/go/client/doorman"
+	"github.com/flipkart-incubator/doorman/go/client/doorman"
 )
 
 var (

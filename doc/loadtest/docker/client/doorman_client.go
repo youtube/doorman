@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	"doorman/go/client/doorman"
-	"doorman/go/ratelimiter"
+	"github.com/flipkart-incubator/doorman/go/client/doorman"
+	"github.com/flipkart-incubator/doorman/go/ratelimiter"
 	log "github.com/golang/glog"
 	"github.com/pborman/uuid"
 	"github.com/prometheus/client_golang/prometheus"

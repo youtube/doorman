@@ -29,14 +29,14 @@ import (
 	"sync"
 	"time"
 
-	"doorman/go/connection"
-	"doorman/go/timeutil"
+	"github.com/flipkart-incubator/doorman/go/connection"
+	"github.com/flipkart-incubator/doorman/go/timeutil"
 	log "github.com/golang/glog"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/net/context"
 	rpc "google.golang.org/grpc"
 
-	pb "doorman/proto/doorman"
+	pb "github.com/flipkart-incubator/doorman/proto/doorman"
 )
 
 const (
