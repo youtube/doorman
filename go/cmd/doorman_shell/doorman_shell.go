@@ -28,8 +28,8 @@ import (
 	"strconv"
 	"sync"
 
+	"doorman/go/client/doorman"
 	"github.com/chzyer/readline"
-	"github.com/flipkart-incubator/doorman/go/client/doorman"
 	log "github.com/golang/glog"
 	"github.com/google/shlex"
 	"github.com/prometheus/client_golang/prometheus"

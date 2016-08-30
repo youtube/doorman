@@ -18,8 +18,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/flipkart-incubator/doorman/go/client/doorman"
 	log "github.com/golang/glog"
+	"doorman/go/client/doorman"
 	"golang.org/x/net/context"
 )
 

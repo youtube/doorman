@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/client"
-	"github.com/flipkart-incubator/doorman/go/timeutil"
 	log "github.com/golang/glog"
+	"doorman/go/timeutil"
 	"golang.org/x/net/context"
 )
 

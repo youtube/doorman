@@ -26,9 +26,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flipkart-incubator/doorman/go/connection"
-	"github.com/flipkart-incubator/doorman/go/server/election"
-	"github.com/flipkart-incubator/doorman/go/timeutil"
+	"doorman/go/connection"
+	"doorman/go/server/election"
+	"doorman/go/timeutil"
 	log "github.com/golang/glog"
 	"github.com/golang/protobuf/proto"
 	"github.com/prometheus/client_golang/prometheus"
@@ -36,7 +36,7 @@ import (
 	rpc "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
-	pb "github.com/flipkart-incubator/doorman/proto/doorman"
+	pb "doorman/proto/doorman"
 )
 
 var (

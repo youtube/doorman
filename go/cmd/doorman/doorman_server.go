@@ -30,15 +30,15 @@ import (
 	rpc "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/flipkart-incubator/doorman/go/configuration"
-	"github.com/flipkart-incubator/doorman/go/connection"
-	"github.com/flipkart-incubator/doorman/go/flagenv"
-	"github.com/flipkart-incubator/doorman/go/server/doorman"
-	"github.com/flipkart-incubator/doorman/go/server/election"
-	"github.com/flipkart-incubator/doorman/go/status"
+	"doorman/go/configuration"
+	"doorman/go/connection"
+	"doorman/go/flagenv"
+	"doorman/go/server/doorman"
+	"doorman/go/server/election"
+	"doorman/go/status"
 	"github.com/ghodss/yaml"
 
-	pb "github.com/flipkart-incubator/doorman/proto/doorman"
+	pb "doorman/proto/doorman"
 
 	_ "expvar"
 	_ "net/http/pprof"

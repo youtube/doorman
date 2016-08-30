@@ -1,4 +1,4 @@
-package: github.com/flipkart-incubator/doorman
+package: doorman
 import:
 - package: github.com/chzyer/readline
 - package: github.com/coreos/etcd

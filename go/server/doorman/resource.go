@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	pb "github.com/flipkart-incubator/doorman/proto/doorman"
+	pb "doorman/proto/doorman"
 	log "github.com/golang/glog"
 )
 
