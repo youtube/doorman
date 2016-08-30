@@ -19,7 +19,7 @@ import (
 	"time"
 
 	log "github.com/golang/glog"
-	"github.com/youtube/doorman/go/client/doorman"
+	"doorman/go/client/doorman"
 	"golang.org/x/net/context"
 )
 

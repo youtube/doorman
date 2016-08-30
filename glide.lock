@@ -1,6 +1,8 @@
-hash: 50931e6bfa1ed3f0dcab69dc8b6c9849c4e68ec5259ef3638a11c11e1a686f07
-updated: 2016-08-29T14:36:47.46451651+05:30
+hash: 771650afaf26905af123ace32154c48b7fdf466d1f2bdda2dfd1fbfa776edfbe
+updated: 2016-08-30T12:33:02.306250603+05:30
 imports:
+- name: bitbucket.org/ww/goautoneg
+  version: 75cd24fc2f2c2a2088577d12123ddee5f54e0675
 - name: github.com/beorn7/perks
   version: 4c0e84591b9aa9e6dcfdf3e020114cd81f89d5f9
   subpackages:
@@ -32,19 +34,17 @@ imports:
 - name: github.com/pborman/uuid
   version: a97ce2ca70fa5a848076093f05e639a89ca34d06
 - name: github.com/prometheus/client_golang
-  version: c5b7fccd204277076155f10851dad72b76a49317
+  version: 6dbab8106ed3ed77359ac85d9cf08e30290df864
   subpackages:
+  - model
   - prometheus
+  - text
 - name: github.com/prometheus/client_model
   version: fa8ad6fec33561be4280a8f0514318c79d7f6cb6
   subpackages:
   - go
 - name: github.com/prometheus/common
   version: 086fbd0536bd9c043653ae7e918882f8b435a0d5
-  subpackages:
-  - expfmt
-  - internal/bitbucket.org/ww/goautoneg
-  - model
 - name: github.com/prometheus/procfs
   version: abf152e5f3e97f2fafac028d2cc06c1feb87ffa5
 - name: github.com/ugorji/go

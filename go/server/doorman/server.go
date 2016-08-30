@@ -26,17 +26,17 @@ import (
 	"sync"
 	"time"
 
+	"doorman/go/connection"
+	"doorman/go/server/election"
+	"doorman/go/timeutil"
 	log "github.com/golang/glog"
 	"github.com/golang/protobuf/proto"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/youtube/doorman/go/connection"
-	"github.com/youtube/doorman/go/server/election"
-	"github.com/youtube/doorman/go/timeutil"
 	"golang.org/x/net/context"
 	rpc "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
-	pb "github.com/youtube/doorman/proto/doorman"
+	pb "doorman/proto/doorman"
 )
 
 var (
@@ -52,14 +52,14 @@ var (
 
 	// defaultResourceTemplate is the defalt configuration entry for "*" resource.
 	defaultResourceTemplate = &pb.ResourceTemplate{
-		IdentifierGlob: proto.String("*"),
-		Capacity:       proto.Float64(0),
-		SafeCapacity:   proto.Float64(0),
+		IdentifierGlob: string("*"),
+		Capacity:       float64(0),
+		SafeCapacity:   float64(0),
 		Algorithm: &pb.Algorithm{
-			Kind:                 pb.Algorithm_FAIR_SHARE.Enum(),
-			RefreshInterval:      proto.Int64(int64(defaultInterval.Seconds())),
-			LeaseLength:          proto.Int64(20),
-			LearningModeDuration: proto.Int64(20),
+			Kind:                 pb.Algorithm_FAIR_SHARE,
+			RefreshInterval:      int64(int64(defaultInterval.Seconds())),
+			LeaseLength:          int64(20),
+			LearningModeDuration: int64(20),
 		},
 	}
 
@@ -67,12 +67,12 @@ var (
 	// which is sent to the lower-level (e.g. root) server only before the server
 	// receives actual requests for resources from the clients.
 	defaultServerCapacityResourceRequest = &pb.ServerCapacityResourceRequest{
-		ResourceId: proto.String("*"),
+		ResourceId: string("*"),
 		Wants: []*pb.PriorityBandAggregate{
 			{
-				Priority:   proto.Int64(int64(defaultPriority)),
-				NumClients: proto.Int64(1),
-				Wants:      proto.Float64(0.0),
+				Priority:   int64(int64(defaultPriority)),
+				NumClients: int64(1),
+				Wants:      float64(0.0),
 			},
 		},
 	}
@@ -227,7 +227,7 @@ func (server *Server) LoadConfig(ctx context.Context, config *pb.ResourceReposit
 // call to performRequests.
 func (server *Server) performRequests(ctx context.Context, retryNumber int) (time.Duration, int) {
 	// Creates new GetServerCapacityRequest.
-	in := &pb.GetServerCapacityRequest{ServerId: proto.String(server.ID)}
+	in := &pb.GetServerCapacityRequest{ServerId: string(server.ID)}
 
 	server.mu.RLock()
 
@@ -241,14 +241,14 @@ func (server *Server) performRequests(ctx context.Context, retryNumber int) (tim
 		// because it makes no sense to ask for zero capacity.
 		if status.SumWants > 0 {
 			in.Resource = append(in.Resource, &pb.ServerCapacityResourceRequest{
-				ResourceId: proto.String(id),
+				ResourceId: string(id),
 				// TODO(rushanny): fill optional Has field which is of type Lease.
 				Wants: []*pb.PriorityBandAggregate{
 					{
 						// TODO(rushanny): replace defaultPriority with some client's priority.
-						Priority:   proto.Int64(int64(defaultPriority)),
-						NumClients: proto.Int64(status.Count),
-						Wants:      proto.Float64(status.SumWants),
+						Priority:   int64(int64(defaultPriority)),
+						NumClients: int64(status.Count),
+						Wants:      float64(status.SumWants),
 					},
 				},
 			})
@@ -278,26 +278,26 @@ func (server *Server) performRequests(ctx context.Context, retryNumber int) (tim
 	expiryTimes := make(map[string]*time.Time, 0)
 
 	for _, pr := range out.Response {
-		_, ok := server.resources[pr.GetResourceId()]
+		_, ok := server.resources[pr.ResourceId]
 		if !ok {
-			log.Errorf("response for non-existing resource: %q", pr.GetResourceId())
+			log.Errorf("response for non-existing resource: %q", pr.ResourceId)
 			continue
 		}
 
 		// Refresh an expiry time for the resource.
-		expiryTime := time.Unix(pr.GetGets().GetExpiryTime(), 0)
-		expiryTimes[pr.GetResourceId()] = &expiryTime
+		expiryTime := time.Unix(pr.Gets.ExpiryTime, 0)
+		expiryTimes[pr.ResourceId] = &expiryTime
 
 		// Add a new resource configuration.
 		templates = append(templates, &pb.ResourceTemplate{
-			IdentifierGlob: proto.String(pr.GetResourceId()),
-			Capacity:       proto.Float64(pr.GetGets().GetCapacity()),
-			SafeCapacity:   proto.Float64(pr.GetSafeCapacity()),
-			Algorithm:      pr.GetAlgorithm(),
+			IdentifierGlob: string(pr.ResourceId),
+			Capacity:       float64(pr.Gets.Capacity),
+			SafeCapacity:   float64(pr.SafeCapacity),
+			Algorithm:      pr.Algorithm,
 		})
 
 		// Find the minimum refresh interval.
-		if refresh := time.Duration(pr.GetGets().GetRefreshInterval()) * time.Second; refresh < interval {
+		if refresh := time.Duration(pr.Gets.RefreshInterval) * time.Second; refresh < interval {
 			interval = refresh
 		}
 	}
@@ -356,7 +356,7 @@ func (server *Server) CurrentMaster() string {
 }
 
 func validateGetCapacityRequest(p *pb.GetCapacityRequest) error {
-	if p.GetClientId() == "" {
+	if p.ClientId == "" {
 		return errors.New("client_id cannot be empty")
 	}
 	seen := make(map[string]bool)
@@ -364,17 +364,17 @@ func validateGetCapacityRequest(p *pb.GetCapacityRequest) error {
 		if err := validateResourceRequest(r); err != nil {
 			return err
 		}
-		seen[r.GetResourceId()] = true
+		seen[r.ResourceId] = true
 	}
 
 	return nil
 }
 
 func validateResourceRequest(p *pb.ResourceRequest) error {
-	if p.GetResourceId() == "" {
+	if p.ResourceId == "" {
 		return errors.New("resource_id cannot be empty")
 	}
-	if p.GetWants() < 0 {
+	if p.Wants < 0 {
 		return errors.New("capacity must be positive")
 	}
 	return nil
@@ -385,7 +385,7 @@ func validateResourceRequest(p *pb.ResourceRequest) error {
 func validateResourceRepository(p *pb.ResourceRepository) error {
 	starFound := false
 	for i, res := range p.Resources {
-		glob := res.GetIdentifierGlob()
+		glob := res.IdentifierGlob
 		// All globs have to be well formed.
 		//
 		// NOTE(ryszard): filepath.Match will NOT return an
@@ -397,19 +397,19 @@ func validateResourceRepository(p *pb.ResourceRepository) error {
 
 		// If there is an algorithm in this entry, validate it.
 		if algo := res.Algorithm; algo != nil {
-			if algo.RefreshInterval == nil || algo.LeaseLength == nil {
+			if algo.RefreshInterval == 0 || algo.LeaseLength == 0 {
 				return errors.New("must have a refresh interval and a lease length")
 			}
 
-			if *algo.RefreshInterval < 1 {
+			if algo.RefreshInterval < 1 {
 				return errors.New("invalid refresh interval, must be at least 1 second")
 			}
 
-			if *algo.LeaseLength < 1 {
+			if algo.LeaseLength < 1 {
 				return errors.New("Invalid lease length, must be at least 1 second")
 			}
 
-			if *algo.LeaseLength < *algo.RefreshInterval {
+			if algo.LeaseLength < algo.RefreshInterval {
 				return errors.New("Lease length must be larger than the refresh interval")
 			}
 		}
@@ -620,14 +620,14 @@ func (server *Server) Close() {
 func (server *Server) findConfigForResource(id string) *pb.ResourceTemplate {
 	// Try to match it literally.
 	for _, tpl := range server.config.Resources {
-		if tpl.GetIdentifierGlob() == id {
+		if tpl.IdentifierGlob == id {
 			return tpl
 		}
 	}
 
 	// See if there's a template that matches as a pattern.
 	for _, tpl := range server.config.Resources {
-		glob := tpl.GetIdentifierGlob()
+		glob := tpl.IdentifierGlob
 		matched, err := filepath.Match(glob, id)
 
 		if err != nil {
@@ -684,13 +684,13 @@ func (server *Server) ReleaseCapacity(ctx context.Context, in *pb.ReleaseCapacit
 		out.Mastership = &pb.Mastership{}
 
 		if server.currentMaster != "" {
-			out.Mastership.MasterAddress = proto.String(server.currentMaster)
+			out.Mastership.MasterAddress = string(server.currentMaster)
 		}
 
 		return out, nil
 	}
 
-	client := in.GetClientId()
+	client := in.ClientId
 
 	// Takes the server lock because we are reading the resource map below.
 	server.mu.RLock()
@@ -744,12 +744,12 @@ func (server *Server) GetCapacity(ctx context.Context, in *pb.GetCapacityRequest
 		out.Mastership = &pb.Mastership{}
 
 		if master != "" {
-			out.Mastership.MasterAddress = proto.String(master)
+			out.Mastership.MasterAddress = string(master)
 		}
 		return out, nil
 	}
 
-	client := in.GetClientId()
+	client := in.ClientId
 
 	// We will create a new goroutine for every resource in the
 	// request. This is the channel that the leases come back on.
@@ -760,11 +760,15 @@ func (server *Server) GetCapacity(ctx context.Context, in *pb.GetCapacityRequest
 	var requests []clientRequest
 
 	for _, req := range in.Resource {
+		_has_capacity := 0.0
+		if has := req.GetHas(); has != nil {
+			_has_capacity = has.Capacity
+		}
 		request := clientRequest{
 			client:     client,
-			resID:      req.GetResourceId(),
-			has:        req.GetHas().GetCapacity(),
-			wants:      req.GetWants(),
+			resID:      req.ResourceId,
+			has:        _has_capacity,
+			wants:      req.Wants,
 			subclients: 1,
 		}
 
@@ -777,11 +781,11 @@ func (server *Server) GetCapacity(ctx context.Context, in *pb.GetCapacityRequest
 	for range in.Resource {
 		item := <-itemsC
 		resp := &pb.ResourceResponse{
-			ResourceId: proto.String(item.id),
+			ResourceId: string(item.id),
 			Gets: &pb.Lease{
-				RefreshInterval: proto.Int64(int64(item.lease.RefreshInterval.Seconds())),
-				ExpiryTime:      proto.Int64(item.lease.Expiry.Unix()),
-				Capacity:        proto.Float64(item.lease.Has),
+				RefreshInterval: int64(int64(item.lease.RefreshInterval.Seconds())),
+				ExpiryTime:      int64(item.lease.Expiry.Unix()),
+				Capacity:        float64(item.lease.Has),
 			},
 		}
 		server.getOrCreateResource(item.id).SetSafeCapacity(resp)
@@ -825,13 +829,13 @@ func (server *Server) GetServerCapacity(ctx context.Context, in *pb.GetServerCap
 		out.Mastership = &pb.Mastership{}
 
 		if master != "" {
-			out.Mastership.MasterAddress = proto.String(master)
+			out.Mastership.MasterAddress = string(master)
 		}
 
 		return out, nil
 	}
 
-	client := in.GetServerId()
+	client := in.ServerId
 
 	// We will create a new goroutine for every resource in the
 	// request. This is the channel that the leases come back on.
@@ -850,21 +854,25 @@ func (server *Server) GetServerCapacity(ctx context.Context, in *pb.GetServerCap
 		// Calaculate total number of subclients and overall wants
 		// capacity that they ask for.
 		for _, wants := range req.Wants {
-			wantsTotal += wants.GetWants()
+			wantsTotal += wants.Wants
 
 			// Validate number of subclients which should be not less than 1,
 			// because every server has at least one subclient: itself.
-			subclients := wants.GetNumClients()
+			subclients := wants.NumClients
 			if subclients < 1 {
 				return nil, rpc.Errorf(codes.InvalidArgument, "subclients should be > 0")
 			}
-			subclientsTotal += wants.GetNumClients()
+			subclientsTotal += wants.NumClients
 		}
 
+		_has_capacity := 0.0
+		if has := req.GetHas(); has != nil {
+			_has_capacity = has.Capacity
+		}
 		request := clientRequest{
 			client:     client,
-			resID:      req.GetResourceId(),
-			has:        req.GetHas().GetCapacity(),
+			resID:      req.ResourceId,
+			has:        _has_capacity,
 			wants:      wantsTotal,
 			subclients: subclientsTotal,
 		}
@@ -878,14 +886,14 @@ func (server *Server) GetServerCapacity(ctx context.Context, in *pb.GetServerCap
 	for range in.Resource {
 		item := <-itemsC
 		resp := &pb.ServerCapacityResourceResponse{
-			ResourceId: proto.String(item.id),
+			ResourceId: string(item.id),
 			Gets: &pb.Lease{
-				RefreshInterval: proto.Int64(int64(item.lease.RefreshInterval.Seconds())),
-				ExpiryTime:      proto.Int64(item.lease.Expiry.Unix()),
-				Capacity:        proto.Float64(item.lease.Has),
+				RefreshInterval: int64(int64(item.lease.RefreshInterval.Seconds())),
+				ExpiryTime:      int64(item.lease.Expiry.Unix()),
+				Capacity:        float64(item.lease.Has),
 			},
-			Algorithm:    server.resources[item.id].config.GetAlgorithm(),
-			SafeCapacity: proto.Float64(server.resources[item.id].config.GetSafeCapacity()),
+			Algorithm:    server.resources[item.id].config.Algorithm,
+			SafeCapacity: float64(server.resources[item.id].config.SafeCapacity),
 		}
 
 		out.Response = append(out.Response, resp)
@@ -898,12 +906,12 @@ func (server *Server) GetServerCapacity(ctx context.Context, in *pb.GetServerCap
 func (server *Server) Discovery(ctx context.Context, in *pb.DiscoveryRequest) (out *pb.DiscoveryResponse, err error) {
 	out = new(pb.DiscoveryResponse)
 
-	out.IsMaster = proto.Bool(server.isMaster)
+	out.IsMaster = server.isMaster
 	out.Mastership = &pb.Mastership{}
 	master := server.CurrentMaster()
 
 	if master != "" {
-		out.Mastership.MasterAddress = proto.String(master)
+		out.Mastership.MasterAddress = string(master)
 	}
 
 	return out, nil

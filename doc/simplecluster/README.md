@@ -23,8 +23,8 @@ sudo gem install foreman
 
 ### Doorman binaries
 ```sh
-go get github.com/youtube/doorman/go/cmd/doorman_shell
-go get github.com/youtube/doorman/go/cmd/doorman
+go get github.com/flipkart-incubator/doorman/go/cmd/doorman_shell
+go get github.com/flipkart-incubator/doorman/go/cmd/doorman
 ```
 
 ## Preparing the configuration
@@ -43,7 +43,7 @@ We will use Foreman to start an Etcd service and 3 doorman processes. Take a loo
 It should look like this:
 
 ```console
-$ cd $GOPATH/src/github.com/youtube/doorman/doc/simplecluster
+$ cd $GOPATH/src/github.com/flipkart-incubator/doorman/doc/simplecluster
 
 $ foreman start
 15:14:34 etcd.1    | started with pid 2057

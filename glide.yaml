@@ -1,9 +1,7 @@
 package: doorman
 import:
 - package: github.com/chzyer/readline
-  version: ^1.4.0
 - package: github.com/coreos/etcd
-  version: ^3.0.6
   subpackages:
   - client
 - package: github.com/ghodss/yaml
@@ -13,11 +11,13 @@ import:
   - proto
 - package: github.com/google/shlex
 - package: github.com/pborman/uuid
-  version: ^1.0.0
 - package: github.com/prometheus/client_golang
-  version: ^0.8.0
+  version: ~0.7.0
   subpackages:
   - prometheus
+- package: github.com/prometheus/client_model
+- package: github.com/prometheus/common
+- package: github.com/prometheus/procfs
 - package: golang.org/x/net
   subpackages:
   - context

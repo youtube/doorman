@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/youtube/doorman/go/client/doorman"
+	"doorman/go/client/doorman"
 	"golang.org/x/net/context"
 )
 

@@ -19,9 +19,8 @@ import (
 	"sync"
 	"time"
 
+	pb "doorman/proto/doorman"
 	log "github.com/golang/glog"
-	"github.com/golang/protobuf/proto"
-	pb "github.com/youtube/doorman/proto/doorman"
 )
 
 // NOTE(ryszard): Any exported Resource methods are responsible for
@@ -66,7 +65,7 @@ func (res *Resource) capacity() float64 {
 		return 0.0
 	}
 
-	return res.config.GetCapacity()
+	return res.config.Capacity
 }
 
 // Release releases any resources held for client. This method is safe
@@ -88,10 +87,10 @@ func (res *Resource) SetSafeCapacity(resp *pb.ResourceResponse) {
 	// know about.
 	// TODO(josv): The calculation of the dynamic safe capacity
 	// needs to take sub clients into account (in a multi-server tree).
-	if res.config.SafeCapacity == nil {
-		resp.SafeCapacity = proto.Float64(*res.config.Capacity / float64(res.store.Count()))
+	if res.config.SafeCapacity == 0.0 {
+		resp.SafeCapacity = float64(res.config.Capacity / float64(res.store.Count()))
 	} else {
-		resp.SafeCapacity = proto.Float64(*res.config.SafeCapacity)
+		resp.SafeCapacity = res.config.SafeCapacity
 	}
 }
 
@@ -130,7 +129,7 @@ func (res *Resource) Matches(cfg *pb.ResourceTemplate) bool {
 	// malformed pattern, so it is safe to quench it (especially
 	// that the config validation should have found any malformed
 	// patterns).
-	glob := cfg.GetIdentifierGlob()
+	glob := cfg.IdentifierGlob
 	matches, _ := filepath.Match(glob, res.ID)
 	return glob == res.ID || matches
 }
@@ -154,10 +153,10 @@ func (server *Server) newResource(id string, cfg *pb.ResourceTemplate) *Resource
 
 	var learningModeDuration time.Duration
 
-	if algo.LearningModeDuration != nil {
-		learningModeDuration = time.Duration(algo.GetLearningModeDuration()) * time.Second
+	if algo.LearningModeDuration != 0 {
+		learningModeDuration = time.Duration(algo.LearningModeDuration) * time.Second
 	} else {
-		learningModeDuration = time.Duration(algo.GetLeaseLength()) * time.Second
+		learningModeDuration = time.Duration(algo.LeaseLength) * time.Second
 	}
 
 	res.learningModeEndTime = server.GetLearningModeEndTime(learningModeDuration)

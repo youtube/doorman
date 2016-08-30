@@ -19,7 +19,7 @@ import (
 
 	log "github.com/golang/glog"
 
-	pb "github.com/youtube/doorman/proto/doorman"
+	pb "doorman/proto/doorman"
 )
 
 // Request specifies a requested capacity lease that an Algorithm may
@@ -44,7 +44,7 @@ type Request struct {
 type Algorithm func(store LeaseStore, capacity float64, request Request) Lease
 
 func getAlgorithmParams(config *pb.Algorithm) (leaseLength, refreshInterval time.Duration) {
-	return time.Duration(config.GetLeaseLength()) * time.Second, time.Duration(config.GetRefreshInterval()) * time.Second
+	return time.Duration(config.LeaseLength) * time.Second, time.Duration(config.RefreshInterval) * time.Second
 }
 
 func minF(left, right float64) float64 {
@@ -172,7 +172,7 @@ func FairShare(config *pb.Algorithm) Algorithm {
 
 		// deservedExtra is the chunk of the extra pool this client is
 		// entitled to.
-		deservedExtra := (extra / float64(wantExtra)) * float64(r.Subclients)
+		deservedExtra := extra / float64(wantExtra) * float64(r.Subclients)
 
 		// The client wants some extra, but less than to what it is
 		// entitled.
@@ -200,7 +200,7 @@ func FairShare(config *pb.Algorithm) Algorithm {
 				wantExtraExtra += lease.Subclients
 			}
 		}
-		deservedExtraExtra := (extraExtra / float64(wantExtraExtra)) * float64(r.Subclients)
+		deservedExtraExtra := extraExtra / float64(wantExtraExtra) * float64(r.Subclients)
 		return store.Assign(r.Client, length, interval, minF(deservedShare+deservedExtra+deservedExtraExtra, available), r.Wants, r.Subclients)
 	}
 }
@@ -309,5 +309,5 @@ var algorithms = map[pb.Algorithm_Kind]func(*pb.Algorithm) Algorithm{
 }
 
 func GetAlgorithm(config *pb.Algorithm) Algorithm {
-	return algorithms[config.GetKind()](config)
+	return algorithms[config.Kind](config)
 }

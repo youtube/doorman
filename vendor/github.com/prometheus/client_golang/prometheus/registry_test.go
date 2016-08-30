@@ -17,36 +17,49 @@
 // Use of this source code is governed by a BSD-style license that can be found
 // in the LICENSE file.
 
-package prometheus_test
+package prometheus
 
 import (
 	"bytes"
+	"encoding/binary"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
-	dto "github.com/prometheus/client_model/go"
-
 	"github.com/golang/protobuf/proto"
-	"github.com/prometheus/common/expfmt"
-
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	dto "github.com/prometheus/client_model/go"
 )
+
+type fakeResponseWriter struct {
+	header http.Header
+	body   bytes.Buffer
+}
+
+func (r *fakeResponseWriter) Header() http.Header {
+	return r.header
+}
+
+func (r *fakeResponseWriter) Write(d []byte) (l int, err error) {
+	return r.body.Write(d)
+}
+
+func (r *fakeResponseWriter) WriteHeader(c int) {
+}
 
 func testHandler(t testing.TB) {
 
-	metricVec := prometheus.NewCounterVec(
-		prometheus.CounterOpts{
+	metricVec := NewCounterVec(
+		CounterOpts{
 			Name:        "name",
 			Help:        "docstring",
-			ConstLabels: prometheus.Labels{"constname": "constvalue"},
+			ConstLabels: Labels{"constname": "constvalue"},
 		},
 		[]string{"labelname"},
 	)
 
 	metricVec.WithLabelValues("val1").Inc()
 	metricVec.WithLabelValues("val2").Inc()
+
+	varintBuf := make([]byte, binary.MaxVarintLen32)
 
 	externalMetricFamily := &dto.MetricFamily{
 		Name: proto.String("externalname"),
@@ -70,9 +83,18 @@ func testHandler(t testing.TB) {
 			},
 		},
 	}
-	externalBuf := &bytes.Buffer{}
-	enc := expfmt.NewEncoder(externalBuf, expfmt.FmtProtoDelim)
-	if err := enc.Encode(externalMetricFamily); err != nil {
+	marshaledExternalMetricFamily, err := proto.Marshal(externalMetricFamily)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var externalBuf bytes.Buffer
+	l := binary.PutUvarint(varintBuf, uint64(len(marshaledExternalMetricFamily)))
+	_, err = externalBuf.Write(varintBuf[:l])
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = externalBuf.Write(marshaledExternalMetricFamily)
+	if err != nil {
 		t.Fatal(err)
 	}
 	externalMetricFamilyAsBytes := externalBuf.Bytes()
@@ -138,9 +160,18 @@ metric: <
 			},
 		},
 	}
-	buf := &bytes.Buffer{}
-	enc = expfmt.NewEncoder(buf, expfmt.FmtProtoDelim)
-	if err := enc.Encode(expectedMetricFamily); err != nil {
+	marshaledExpectedMetricFamily, err := proto.Marshal(expectedMetricFamily)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	l = binary.PutUvarint(varintBuf, uint64(len(marshaledExpectedMetricFamily)))
+	_, err = buf.Write(varintBuf[:l])
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = buf.Write(marshaledExpectedMetricFamily)
+	if err != nil {
 		t.Fatal(err)
 	}
 	expectedMetricFamilyAsBytes := buf.Bytes()
@@ -185,7 +216,7 @@ metric: <
 
 	externalMetricFamilyWithSameName := &dto.MetricFamily{
 		Name: proto.String("name"),
-		Help: proto.String("docstring"),
+		Help: proto.String("inconsistent help string does not matter here"),
 		Type: dto.MetricType_COUNTER.Enum(),
 		Metric: []*dto.Metric{
 			{
@@ -217,7 +248,7 @@ metric: <
 	var scenarios = []struct {
 		headers    map[string]string
 		out        output
-		collector  prometheus.Collector
+		collector  Collector
 		externalMF []*dto.MetricFamily
 	}{
 		{ // 0
@@ -454,22 +485,21 @@ metric: <
 		},
 	}
 	for i, scenario := range scenarios {
-		registry := prometheus.NewPedanticRegistry()
-		gatherer := prometheus.Gatherer(registry)
-		if scenario.externalMF != nil {
-			gatherer = prometheus.Gatherers{
-				registry,
-				prometheus.GathererFunc(func() ([]*dto.MetricFamily, error) {
-					return scenario.externalMF, nil
-				}),
-			}
-		}
+		registry := newRegistry()
+		registry.collectChecksEnabled = true
 
 		if scenario.collector != nil {
 			registry.Register(scenario.collector)
 		}
-		writer := httptest.NewRecorder()
-		handler := prometheus.InstrumentHandler("prometheus", promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{}))
+		if scenario.externalMF != nil {
+			registry.metricFamilyInjectionHook = func() []*dto.MetricFamily {
+				return scenario.externalMF
+			}
+		}
+		writer := &fakeResponseWriter{
+			header: http.Header{},
+		}
+		handler := InstrumentHandler("prometheus", registry)
 		request, _ := http.NewRequest("GET", "/", nil)
 		for key, value := range scenario.headers {
 			request.Header.Add(key, value)
@@ -477,7 +507,7 @@ metric: <
 		handler(writer, request)
 
 		for key, value := range scenario.out.headers {
-			if writer.HeaderMap.Get(key) != value {
+			if writer.Header().Get(key) != value {
 				t.Errorf(
 					"%d. expected %q for header %q, got %q",
 					i, value, key, writer.Header().Get(key),
@@ -485,10 +515,10 @@ metric: <
 			}
 		}
 
-		if !bytes.Equal(scenario.out.body, writer.Body.Bytes()) {
+		if !bytes.Equal(scenario.out.body, writer.body.Bytes()) {
 			t.Errorf(
-				"%d. expected body:\n%s\ngot body:\n%s\n",
-				i, scenario.out.body, writer.Body.Bytes(),
+				"%d. expected %q for body, got %q",
+				i, scenario.out.body, writer.body.Bytes(),
 			)
 		}
 	}
@@ -501,45 +531,5 @@ func TestHandler(t *testing.T) {
 func BenchmarkHandler(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		testHandler(b)
-	}
-}
-
-func TestRegisterWithOrGet(t *testing.T) {
-	// Replace the default registerer just to be sure. This is bad, but this
-	// whole test will go away once RegisterOrGet is removed.
-	oldRegisterer := prometheus.DefaultRegisterer
-	defer func() {
-		prometheus.DefaultRegisterer = oldRegisterer
-	}()
-	prometheus.DefaultRegisterer = prometheus.NewRegistry()
-	original := prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "test",
-			Help: "help",
-		},
-		[]string{"foo", "bar"},
-	)
-	equalButNotSame := prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "test",
-			Help: "help",
-		},
-		[]string{"foo", "bar"},
-	)
-	if err := prometheus.Register(original); err != nil {
-		t.Fatal(err)
-	}
-	if err := prometheus.Register(equalButNotSame); err == nil {
-		t.Fatal("expected error when registringe equal collector")
-	}
-	existing, err := prometheus.RegisterOrGet(equalButNotSame)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if existing != original {
-		t.Error("expected original collector but got something else")
-	}
-	if existing == equalButNotSame {
-		t.Error("expected original callector but got new one")
 	}
 }

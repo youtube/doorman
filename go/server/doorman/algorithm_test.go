@@ -19,8 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
-	pb "github.com/youtube/doorman/proto/doorman"
+	pb "doorman/proto/doorman"
 )
 
 type testCase struct {
@@ -289,8 +288,8 @@ func TestLeaseLengthAndRefreshInterval(t *testing.T) {
 	)
 
 	store, algo := NewLeaseStore("test"), ProportionalShare(&pb.Algorithm{
-		LeaseLength:     proto.Int64(leaseLength),
-		RefreshInterval: proto.Int64(refreshInterval),
+		LeaseLength:     int64(leaseLength),
+		RefreshInterval: int64(refreshInterval),
 	})
 
 	now := time.Now()

@@ -18,9 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
-
-	pb "github.com/youtube/doorman/proto/doorman"
+	pb "doorman/proto/doorman"
 )
 
 const (
@@ -30,13 +28,13 @@ const (
 
 func makeResourceTemplate(name string, algo pb.Algorithm_Kind) *pb.ResourceTemplate {
 	return &pb.ResourceTemplate{
-		IdentifierGlob: proto.String(name),
-		Capacity:       proto.Float64(100),
+		IdentifierGlob: string(name),
+		Capacity:       float64(100),
 		Algorithm: &pb.Algorithm{
-			Kind:                 algo.Enum(),
-			RefreshInterval:      proto.Int64(5),
-			LeaseLength:          proto.Int64(20),
-			LearningModeDuration: proto.Int64(0),
+			Kind:                 algo,
+			RefreshInterval:      int64(5),
+			LeaseLength:          int64(20),
+			LearningModeDuration: int64(0),
 		},
 	}
 }
@@ -70,7 +68,7 @@ func TestFullMatch(t *testing.T) {
 	}
 
 	res := s.getOrCreateResource("foo")
-	if got, want := res.config.GetIdentifierGlob(), "foo"; got != want {
+	if got, want := res.config.IdentifierGlob, "foo"; got != want {
 		t.Errorf(`res.config.GetIdentifierGlob() = %v, want %v`, got, want)
 	}
 }
@@ -96,7 +94,7 @@ func TestDecide(t *testing.T) {
 
 func testSafeCapacity(t *testing.T) {
 	template := makeResourceTemplate("res_with_safe_caoacity", pb.Algorithm_FAIR_SHARE)
-	template.SafeCapacity = proto.Float64(10.0)
+	template.SafeCapacity = float64(10.0)
 	s, err := MakeTestServer(template,
 		makeResourceTemplate("*", pb.Algorithm_FAIR_SHARE))
 	if err != nil {
@@ -109,8 +107,8 @@ func testSafeCapacity(t *testing.T) {
 	resp := &pb.ResourceResponse{}
 	res.SetSafeCapacity(resp)
 
-	if *resp.SafeCapacity != 10 {
-		t.Errorf("*resp.SafeCapacity: want:10, got:%v", *resp.SafeCapacity)
+	if resp.SafeCapacity != 10 {
+		t.Errorf("*resp.SafeCapacity: want:10, got:%v", resp.SafeCapacity)
 	}
 
 	res = s.getOrCreateResource("res_without_safe_capacity")
@@ -119,8 +117,8 @@ func testSafeCapacity(t *testing.T) {
 	resp = &pb.ResourceResponse{}
 	res.SetSafeCapacity(resp)
 
-	if *resp.SafeCapacity != 50 {
-		t.Errorf("*resp.SafeCapacity: want:50, got:%v", *resp.SafeCapacity)
+	if resp.SafeCapacity != 50 {
+		t.Errorf("*resp.SafeCapacity: want:50, got:%v", resp.SafeCapacity)
 	}
 }
 

@@ -29,15 +29,14 @@ import (
 	"sync"
 	"time"
 
+	"doorman/go/connection"
+	"doorman/go/timeutil"
 	log "github.com/golang/glog"
-	"github.com/golang/protobuf/proto"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/youtube/doorman/go/connection"
-	"github.com/youtube/doorman/go/timeutil"
 	"golang.org/x/net/context"
 	rpc "google.golang.org/grpc"
 
-	pb "github.com/youtube/doorman/proto/doorman"
+	pb "doorman/proto/doorman"
 )
 
 const (
@@ -202,11 +201,11 @@ func NewWithID(addr string, id string, opts ...Option) (*Client, error) {
 
 // GetMaster returns the address of the Doorman master we are connected to.
 func (client *Client) GetMaster() string {
-  if client.conn == nil {
-    return ""
-  }
+	if client.conn == nil {
+		return ""
+	}
 
-  return client.conn.String()
+	return client.conn.String()
 }
 
 // run is the client's main loop. It takes care of requesting new
@@ -294,7 +293,7 @@ func (client *Client) removeResource(res *resourceImpl) error {
 	close(res.capacity)
 
 	in := &pb.ReleaseCapacityRequest{
-		ClientId: proto.String(client.id),
+		ClientId: string(client.id),
 		ResourceId: []string{
 			res.id,
 		}}
@@ -312,15 +311,15 @@ func (client *Client) removeResource(res *resourceImpl) error {
 // call to performRequests.
 func (client *Client) performRequests(retryNumber int) (interval time.Duration, nextRetryNumber int) {
 	// Creates new GetCapacityRequest
-	in := &pb.GetCapacityRequest{ClientId: proto.String(client.id)}
+	in := &pb.GetCapacityRequest{ClientId: string(client.id)}
 
 	// Adds all resources in this client's resource registry to the
 	// request.
 	for id, resource := range client.resources {
 		in.Resource = append(in.Resource, &pb.ResourceRequest{
-			Priority:   proto.Int64(resource.priority),
-			ResourceId: proto.String(id),
-			Wants:      proto.Float64(resource.Wants()),
+			Priority:   int64(resource.priority),
+			ResourceId: string(id),
+			Wants:      float64(resource.Wants()),
 			Has:        resource.lease,
 		})
 	}
@@ -349,29 +348,29 @@ func (client *Client) performRequests(retryNumber int) (interval time.Duration, 
 	}
 
 	for _, pr := range out.Response {
-		res, ok := client.resources[pr.GetResourceId()]
+		res, ok := client.resources[pr.ResourceId]
 
 		if !ok {
-			log.Errorf("response for non-existing resource: %q", pr.GetResourceId())
+			log.Errorf("response for non-existing resource: %q", pr.ResourceId)
 			continue
 		}
 
 		oldCapacity := float64(-1)
 
 		if res.lease != nil {
-			oldCapacity = res.lease.GetCapacity()
+			oldCapacity = res.lease.Capacity
 		}
 
-		res.lease = pr.GetGets()
+		res.lease = pr.Gets
 
 		// Only send a message down the channel if the capacity has changed.
-		if res.lease.GetCapacity() != oldCapacity {
+		if res.lease.Capacity != oldCapacity {
 			// res.capacity is a buffered channel, so if no one is
 			// receiving on the other side this will send messages
 			// over it until it reaches its size, and then will
 			// start dropping them.
 			select {
-			case res.capacity <- res.lease.GetCapacity():
+			case res.capacity <- res.lease.Capacity:
 			default:
 			}
 		}
@@ -381,7 +380,7 @@ func (client *Client) performRequests(retryNumber int) (interval time.Duration, 
 	interval = veryLongTime
 
 	for _, res := range client.resources {
-		if refresh := time.Duration(res.lease.GetRefreshInterval()) * time.Second; refresh < interval {
+		if refresh := time.Duration(res.lease.RefreshInterval) * time.Second; refresh < interval {
 			interval = refresh
 		}
 	}
@@ -427,7 +426,7 @@ func (client *Client) Close() {
 	<-client.goRoutineHalted
 
 	in := &pb.ReleaseCapacityRequest{
-		ClientId:   proto.String(client.id),
+		ClientId:   string(client.id),
 		ResourceId: make([]string, len(client.resources)),
 	}
 
@@ -506,7 +505,7 @@ type resourceImpl struct {
 // expires returns the time at which the lease for this resource will
 // expire.
 func (res *resourceImpl) expires() time.Time {
-	return time.Unix(res.lease.GetExpiryTime(), 0)
+	return time.Unix(res.lease.ExpiryTime, 0)
 }
 
 // Capacity implements the Resource interface.
