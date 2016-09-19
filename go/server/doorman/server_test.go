@@ -522,7 +522,7 @@ func TestGetServerCapacity(t *testing.T) {
 					Kind:                 pb.Algorithm_FAIR_SHARE,
 					RefreshInterval:      int64(5),
 					LeaseLength:          int64(20),
-					LearningModeDuration: int64(0),
+					LearningModeDuration: int64(-1),
 				},
 			},
 		},
@@ -593,7 +593,7 @@ func TestIntermediateServerUpdate(t *testing.T) {
 					Kind:                 pb.Algorithm_FAIR_SHARE,
 					RefreshInterval:      int64(1),
 					LeaseLength:          int64(2),
-					LearningModeDuration: int64(0),
+					LearningModeDuration: int64(-1),
 				},
 			},
 		},
@@ -601,8 +601,8 @@ func TestIntermediateServerUpdate(t *testing.T) {
 		t.Fatalf("fix.server.LoadConfig: %v", err)
 	}
 
-	// To avoid waiting for the learning mode's end time, set it to zero.
-	defaultResourceTemplate.Algorithm.LearningModeDuration = 0
+	// To avoid waiting for the learning mode's end time, make it less than zero.
+	defaultResourceTemplate.Algorithm.LearningModeDuration = -1
 	defaultResourceTemplate.Algorithm.RefreshInterval = 1
 	defaultResourceTemplate.Algorithm.LeaseLength = 2
 

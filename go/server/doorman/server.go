@@ -169,10 +169,10 @@ func (server *Server) WaitUntilConfigured() {
 // GetLearningModeEndTime returns the timestamp where a resource that has a
 // particular learning mode duration leaves learning mode.
 // mode duration is still in learning mode.
-// Note: If the learningModeDuration is less or equal to zero there is no
+// Note: If the learningModeDuration is less than zero there is no
 // learning mode!
 func (server *Server) GetLearningModeEndTime(learningModeDuration time.Duration) time.Time {
-	if learningModeDuration.Seconds() <= 0 {
+	if learningModeDuration.Seconds() < 0 {
 		return time.Unix(0, 0)
 	}
 
