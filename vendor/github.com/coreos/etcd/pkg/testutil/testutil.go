@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import (
 	"time"
 )
 
+// WaitSchedule briefly sleeps in order to invoke the go scheduler.
 // TODO: improve this when we are able to know the schedule or status of target go-routine.
 func WaitSchedule() {
 	time.Sleep(10 * time.Millisecond)

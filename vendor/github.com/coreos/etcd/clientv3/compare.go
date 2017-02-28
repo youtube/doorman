@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -72,11 +72,11 @@ func Version(key string) Cmp {
 	return Cmp{Key: []byte(key), Target: pb.Compare_VERSION}
 }
 
-func CreatedRevision(key string) Cmp {
+func CreateRevision(key string) Cmp {
 	return Cmp{Key: []byte(key), Target: pb.Compare_CREATE}
 }
 
-func ModifiedRevision(key string) Cmp {
+func ModRevision(key string) Cmp {
 	return Cmp{Key: []byte(key), Target: pb.Compare_MOD}
 }
 

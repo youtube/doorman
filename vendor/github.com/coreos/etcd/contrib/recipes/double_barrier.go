@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
 package recipe
 
 import (
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/storage/storagepb"
+	"github.com/coreos/etcd/mvcc/mvccpb"
+	"golang.org/x/net/context"
 )
 
 // DoubleBarrier blocks processes on Enter until an expected count enters, then
@@ -67,13 +67,16 @@ func (b *DoubleBarrier) Enter() error {
 		b.client,
 		b.key+"/ready",
 		ek.Revision(),
-		[]storagepb.Event_EventType{storagepb.PUT})
+		[]mvccpb.Event_EventType{mvccpb.PUT})
 	return err
 }
 
 // Leave waits for "count" processes to leave the barrier then returns
 func (b *DoubleBarrier) Leave() error {
 	resp, err := b.client.Get(b.ctx, b.key+"/waiters", clientv3.WithPrefix())
+	if err != nil {
+		return err
+	}
 	if len(resp.Kvs) == 0 {
 		return nil
 	}
@@ -106,7 +109,7 @@ func (b *DoubleBarrier) Leave() error {
 			b.client,
 			string(highest.Key),
 			highest.ModRevision,
-			[]storagepb.Event_EventType{storagepb.DELETE})
+			[]mvccpb.Event_EventType{mvccpb.DELETE})
 		if err != nil {
 			return err
 		}
@@ -114,7 +117,7 @@ func (b *DoubleBarrier) Leave() error {
 	}
 
 	// delete self and wait on lowest process
-	if err := b.myKey.Delete(); err != nil {
+	if err = b.myKey.Delete(); err != nil {
 		return err
 	}
 
@@ -123,7 +126,7 @@ func (b *DoubleBarrier) Leave() error {
 		b.client,
 		key,
 		lowest.ModRevision,
-		[]storagepb.Event_EventType{storagepb.DELETE})
+		[]mvccpb.Event_EventType{mvccpb.DELETE})
 	if err != nil {
 		return err
 	}

@@ -30,15 +30,15 @@ import (
 	rpc "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	"doorman/go/configuration"
+	"doorman/go/connection"
+	"doorman/go/flagenv"
+	"doorman/go/server/doorman"
+	"doorman/go/server/election"
+	"doorman/go/status"
 	"github.com/ghodss/yaml"
-	"github.com/youtube/doorman/go/configuration"
-	"github.com/youtube/doorman/go/connection"
-	"github.com/youtube/doorman/go/flagenv"
-	"github.com/youtube/doorman/go/server/doorman"
-	"github.com/youtube/doorman/go/server/election"
-	"github.com/youtube/doorman/go/status"
 
-	pb "github.com/youtube/doorman/proto/doorman"
+	pb "doorman/proto/doorman"
 
 	_ "expvar"
 	_ "net/http/pprof"
@@ -210,6 +210,7 @@ func main() {
 			}
 			cfg := new(pb.ResourceRepository)
 			if err := yaml.Unmarshal(data, cfg); err != nil {
+				log.Error(err)
 				log.Errorf("cannot unmarshal config data: %q", data)
 				continue
 			}

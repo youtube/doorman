@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
 package recipe
 
 import (
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	v3 "github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/storage/storagepb"
+	"github.com/coreos/etcd/mvcc/mvccpb"
+	"golang.org/x/net/context"
 )
 
 // Barrier creates a key in etcd to block processes, then deletes the key to
@@ -60,6 +60,6 @@ func (b *Barrier) Wait() error {
 		b.client,
 		b.key,
 		resp.Header.Revision,
-		[]storagepb.Event_EventType{storagepb.PUT, storagepb.DELETE})
+		[]mvccpb.Event_EventType{mvccpb.PUT, mvccpb.DELETE})
 	return err
 }

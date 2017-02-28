@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ package schedule
 import (
 	"testing"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
+	"golang.org/x/net/context"
 )
 
 func TestFIFOSchedule(t *testing.T) {
@@ -28,7 +28,7 @@ func TestFIFOSchedule(t *testing.T) {
 	jobCreator := func(i int) Job {
 		return func(ctx context.Context) {
 			if next != i {
-				t.Fatalf("job#%d: got %d, want %d", next, i)
+				t.Fatalf("job#%d: got %d, want %d", i, next, i)
 			}
 			next = i + 1
 		}

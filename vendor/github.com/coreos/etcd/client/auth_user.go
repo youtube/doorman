@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import (
 	"net/url"
 	"path"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
+	"golang.org/x/net/context"
 )
 
 var (
@@ -34,6 +34,17 @@ type User struct {
 	Roles    []string `json:"roles"`
 	Grant    []string `json:"grant,omitempty"`
 	Revoke   []string `json:"revoke,omitempty"`
+}
+
+// userListEntry is the user representation given by the server for ListUsers
+type userListEntry struct {
+	User  string `json:"user"`
+	Roles []Role `json:"roles"`
+}
+
+type UserRoles struct {
+	User  string `json:"user"`
+	Roles []Role `json:"roles"`
 }
 
 func v2AuthURL(ep url.URL, action string, name string) *url.URL {
@@ -187,13 +198,20 @@ func (u *httpAuthUserAPI) ListUsers(ctx context.Context) ([]string, error) {
 		}
 		return nil, sec
 	}
+
 	var userList struct {
-		Users []string `json:"users"`
+		Users []userListEntry `json:"users"`
 	}
+
 	if err = json.Unmarshal(body, &userList); err != nil {
 		return nil, err
 	}
-	return userList.Users, nil
+
+	ret := make([]string, 0, len(userList.Users))
+	for _, u := range userList.Users {
+		ret = append(ret, u.User)
+	}
+	return ret, nil
 }
 
 func (u *httpAuthUserAPI) AddUser(ctx context.Context, username string, password string) error {
@@ -289,7 +307,14 @@ func (u *httpAuthUserAPI) modUser(ctx context.Context, req *authUserAPIAction) (
 	}
 	var user User
 	if err = json.Unmarshal(body, &user); err != nil {
-		return nil, err
+		var userR UserRoles
+		if urerr := json.Unmarshal(body, &userR); urerr != nil {
+			return nil, err
+		}
+		user.User = userR.User
+		for _, r := range userR.Roles {
+			user.Roles = append(user.Roles, r.Role)
+		}
 	}
 	return &user, nil
 }

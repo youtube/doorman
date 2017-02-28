@@ -1,9 +1,10 @@
-package: github.com/youtube/doorman
+package: doorman
 import:
 - package: github.com/chzyer/readline
 - package: github.com/coreos/etcd
   subpackages:
   - client
+- package: github.com/ghodss/yaml
 - package: github.com/golang/glog
 - package: github.com/golang/protobuf
   subpackages:
@@ -11,17 +12,19 @@ import:
 - package: github.com/google/shlex
 - package: github.com/pborman/uuid
 - package: github.com/prometheus/client_golang
+  version: ~0.7.0
   subpackages:
   - prometheus
+- package: github.com/prometheus/client_model
+- package: github.com/prometheus/common
+- package: github.com/prometheus/procfs
 - package: golang.org/x/net
   subpackages:
   - context
 - package: google.golang.org/grpc
+  version: ^1.0.1-GA
   subpackages:
   - codes
   - credentials
   - examples/helloworld/helloworld
   - grpclog
-- package: bitbucket.org/ww/goautoneg
-- package: github.com/ghodss/yaml
-- package: gopkg.in/yaml.v2

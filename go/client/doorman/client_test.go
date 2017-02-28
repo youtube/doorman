@@ -23,12 +23,11 @@ import (
 	"golang.org/x/net/context"
 
 	log "github.com/golang/glog"
-	"github.com/golang/protobuf/proto"
 	rpc "google.golang.org/grpc"
 
-	server "github.com/youtube/doorman/go/server/doorman"
+	server "doorman/go/server/doorman"
 
-	pb "github.com/youtube/doorman/proto/doorman"
+	pb "doorman/proto/doorman"
 )
 
 var (
@@ -64,14 +63,14 @@ func setUp() (*fixture, error) {
 	)
 
 	fix.server, err = server.MakeTestServer(&pb.ResourceTemplate{
-		IdentifierGlob: proto.String("*"),
-		Capacity:       proto.Float64(100),
-		SafeCapacity:   proto.Float64(2),
+		IdentifierGlob: string("*"),
+		Capacity:       float64(100),
+		SafeCapacity:   float64(2),
 		Algorithm: &pb.Algorithm{
-			Kind:                 pb.Algorithm_FAIR_SHARE.Enum(),
-			RefreshInterval:      proto.Int64(5),
-			LeaseLength:          proto.Int64(20),
-			LearningModeDuration: proto.Int64(60),
+			Kind:                 pb.Algorithm_FAIR_SHARE,
+			RefreshInterval:      int64(5),
+			LeaseLength:          int64(20),
+			LearningModeDuration: int64(60),
 		},
 	})
 	if err != nil {
@@ -122,7 +121,7 @@ type nonMasterServer struct {
 func (server nonMasterServer) GetCapacity(_ context.Context, _ *pb.GetCapacityRequest) (out *pb.GetCapacityResponse, err error) {
 	out = new(pb.GetCapacityResponse)
 	out.Mastership = &pb.Mastership{
-		MasterAddress: proto.String(server.master),
+		MasterAddress: string(server.master),
 	}
 	return out, nil
 }

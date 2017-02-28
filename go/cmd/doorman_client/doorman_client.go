@@ -27,7 +27,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/youtube/doorman/go/client/doorman"
+	"doorman/go/client/doorman"
 )
 
 var (
@@ -51,7 +51,7 @@ func main() {
 
 	var opts []grpc.DialOption
 	if len(*caFile) != 0 {
-		var creds credentials.TransportAuthenticator
+		var creds credentials.TransportCredentials
 		var err error
 		creds, err = credentials.NewClientTLSFromFile(*caFile, "")
 		if err != nil {

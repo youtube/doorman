@@ -12,6 +12,7 @@ const (
 	CharTab       = 9
 	CharCtrlJ     = 10
 	CharKill      = 11
+	CharCtrlL     = 12
 	CharEnter     = 13
 	CharNext      = 14
 	CharPrev      = 16
@@ -20,6 +21,7 @@ const (
 	CharTranspose = 20
 	CharCtrlU     = 21
 	CharCtrlW     = 23
+	CharCtrlZ     = 26
 	CharEsc       = 27
 	CharEscapeEx  = 91
 	CharBackspace = 127

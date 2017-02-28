@@ -7,5 +7,5 @@ The following individuals have contributed code to this repository
 
 * Björn Rabenstein <beorn@soundcloud.com>
 * Fabian Reinartz <fabian@soundcloud.com>
-* Julius Volz <julius@soundcloud.com>
+* Julius Volz <julius.volz@gmail.com>
 * Miguel Molina <hi@mvader.me>

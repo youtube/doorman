@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,12 +18,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	"github.com/coreos/etcd/etcdserver/stats"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/raft"
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/snap"
+	"golang.org/x/net/context"
 )
 
 const (
@@ -92,9 +92,8 @@ type Peer interface {
 // It is only used when the stream has not been established.
 type peer struct {
 	// id of the remote raft peer node
-	id     types.ID
-	r      Raft
-	v3demo bool
+	id types.ID
+	r  Raft
 
 	status *peerStatus
 
@@ -118,19 +117,34 @@ type peer struct {
 	stopc  chan struct{}
 }
 
-func startPeer(transport *Transport, urls types.URLs, local, to, cid types.ID, r Raft, fs *stats.FollowerStats, errorc chan error, v3demo bool) *peer {
-	status := newPeerStatus(to)
+func startPeer(transport *Transport, urls types.URLs, peerID types.ID, fs *stats.FollowerStats) *peer {
+	plog.Infof("starting peer %s...", peerID)
+	defer plog.Infof("started peer %s", peerID)
+
+	status := newPeerStatus(peerID)
 	picker := newURLPicker(urls)
+	errorc := transport.ErrorC
+	r := transport.Raft
+	pipeline := &pipeline{
+		peerID:        peerID,
+		tr:            transport,
+		picker:        picker,
+		status:        status,
+		followerStats: fs,
+		raft:          r,
+		errorc:        errorc,
+	}
+	pipeline.start()
+
 	p := &peer{
-		id:             to,
+		id:             peerID,
 		r:              r,
-		v3demo:         v3demo,
 		status:         status,
 		picker:         picker,
-		msgAppV2Writer: startStreamWriter(to, status, fs, r),
-		writer:         startStreamWriter(to, status, fs, r),
-		pipeline:       newPipeline(transport, picker, local, to, cid, status, fs, r, errorc),
-		snapSender:     newSnapshotSender(transport, picker, local, to, cid, status, r, errorc),
+		msgAppV2Writer: startStreamWriter(peerID, status, fs, r),
+		writer:         startStreamWriter(peerID, status, fs, r),
+		pipeline:       pipeline,
+		snapSender:     newSnapshotSender(transport, picker, peerID, status),
 		sendc:          make(chan raftpb.Message),
 		recvc:          make(chan raftpb.Message, recvBufSize),
 		propc:          make(chan raftpb.Message, maxPendingProposals),
@@ -142,10 +156,6 @@ func startPeer(transport *Transport, urls types.URLs, local, to, cid types.ID, r
 	go func() {
 		for {
 			select {
-			case mm := <-p.propc:
-				if err := r.Process(ctx, mm); err != nil {
-					plog.Warningf("failed to process raft message (%v)", err)
-				}
 			case mm := <-p.recvc:
 				if err := r.Process(ctx, mm); err != nil {
 					plog.Warningf("failed to process raft message (%v)", err)
@@ -156,8 +166,42 @@ func startPeer(transport *Transport, urls types.URLs, local, to, cid types.ID, r
 		}
 	}()
 
-	p.msgAppV2Reader = startStreamReader(transport, picker, streamTypeMsgAppV2, local, to, cid, status, p.recvc, p.propc, errorc)
-	p.msgAppReader = startStreamReader(transport, picker, streamTypeMessage, local, to, cid, status, p.recvc, p.propc, errorc)
+	// r.Process might block for processing proposal when there is no leader.
+	// Thus propc must be put into a separate routine with recvc to avoid blocking
+	// processing other raft messages.
+	go func() {
+		for {
+			select {
+			case mm := <-p.propc:
+				if err := r.Process(ctx, mm); err != nil {
+					plog.Warningf("failed to process raft message (%v)", err)
+				}
+			case <-p.stopc:
+				return
+			}
+		}
+	}()
+
+	p.msgAppV2Reader = &streamReader{
+		peerID: peerID,
+		typ:    streamTypeMsgAppV2,
+		tr:     transport,
+		picker: picker,
+		status: status,
+		recvc:  p.recvc,
+		propc:  p.propc,
+	}
+	p.msgAppReader = &streamReader{
+		peerID: peerID,
+		typ:    streamTypeMessage,
+		tr:     transport,
+		picker: picker,
+		status: status,
+		recvc:  p.recvc,
+		propc:  p.propc,
+	}
+	p.msgAppV2Reader.start()
+	p.msgAppReader.start()
 
 	return p
 }
@@ -209,7 +253,7 @@ func (p *peer) attachOutgoingConn(conn *outgoingConn) {
 	}
 }
 
-func (p *peer) activeSince() time.Time { return p.status.activeSince }
+func (p *peer) activeSince() time.Time { return p.status.activeSince() }
 
 // Pause pauses the peer. The peer will simply drops all incoming
 // messages without returning an error.
@@ -217,6 +261,8 @@ func (p *peer) Pause() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.paused = true
+	p.msgAppReader.pause()
+	p.msgAppV2Reader.pause()
 }
 
 // Resume resumes a paused peer.
@@ -224,9 +270,14 @@ func (p *peer) Resume() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.paused = false
+	p.msgAppReader.resume()
+	p.msgAppV2Reader.resume()
 }
 
 func (p *peer) stop() {
+	plog.Infof("stopping peer %s...", p.id)
+	defer plog.Infof("stopped peer %s", p.id)
+
 	close(p.stopc)
 	p.cancel()
 	p.msgAppV2Writer.stop()

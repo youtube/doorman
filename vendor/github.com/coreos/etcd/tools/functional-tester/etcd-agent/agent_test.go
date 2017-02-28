@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,11 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
 
-const etcdPath = filepath.Join(os.Getenv("GOPATH"), "bin/etcd")
+var etcdPath = filepath.Join(os.Getenv("GOPATH"), "bin/etcd")
 
 func TestAgentStart(t *testing.T) {
 	defer os.Remove("etcd.log")
@@ -46,7 +47,7 @@ func TestAgentRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = a.stop()
+	err = a.stopWithSig(syscall.SIGTERM)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,11 +21,12 @@ import (
 	"os"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/coreos/etcd/client"
 	"github.com/coreos/etcd/pkg/testutil"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
+	"golang.org/x/net/context"
 )
 
 func init() {
@@ -66,7 +67,7 @@ func testClusterUsingDiscovery(t *testing.T, size int) {
 	dc.Launch(t)
 	defer dc.Terminate(t)
 	// init discovery token space
-	dcc := mustNewHTTPClient(t, dc.URLs(), nil)
+	dcc := MustNewHTTPClient(t, dc.URLs(), nil)
 	dkapi := client.NewKeysAPI(dcc)
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	if _, err := dkapi.Create(ctx, "/_config/size", fmt.Sprintf("%d", size)); err != nil {
@@ -89,7 +90,7 @@ func TestTLSClusterOf3UsingDiscovery(t *testing.T) {
 	dc.Launch(t)
 	defer dc.Terminate(t)
 	// init discovery token space
-	dcc := mustNewHTTPClient(t, dc.URLs(), nil)
+	dcc := MustNewHTTPClient(t, dc.URLs(), nil)
 	dkapi := client.NewKeysAPI(dcc)
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	if _, err := dkapi.Create(ctx, "/_config/size", fmt.Sprintf("%d", 3)); err != nil {
@@ -156,7 +157,7 @@ func testDecreaseClusterSize(t *testing.T, size int) {
 func TestForceNewCluster(t *testing.T) {
 	c := NewCluster(t, 3)
 	c.Launch(t)
-	cc := mustNewHTTPClient(t, []string{c.Members[0].URL()}, nil)
+	cc := MustNewHTTPClient(t, []string{c.Members[0].URL()}, nil)
 	kapi := client.NewKeysAPI(cc)
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	resp, err := kapi.Create(ctx, "/foo", "bar")
@@ -183,7 +184,7 @@ func TestForceNewCluster(t *testing.T) {
 	c.waitLeader(t, c.Members[:1])
 
 	// use new http client to init new connection
-	cc = mustNewHTTPClient(t, []string{c.Members[0].URL()}, nil)
+	cc = MustNewHTTPClient(t, []string{c.Members[0].URL()}, nil)
 	kapi = client.NewKeysAPI(cc)
 	// ensure force restart keep the old data, and new cluster can make progress
 	ctx, cancel = context.WithTimeout(context.Background(), requestTimeout)
@@ -231,9 +232,14 @@ func TestIssue2681(t *testing.T) {
 }
 
 // Ensure we can remove a member after a snapshot then add a new one back.
-func TestIssue2746(t *testing.T) {
+func TestIssue2746(t *testing.T) { testIssue2746(t, 5) }
+
+// With 3 nodes TestIssue2476 sometimes had a shutdown with an inflight snapshot.
+func TestIssue2746WithThree(t *testing.T) { testIssue2746(t, 3) }
+
+func testIssue2746(t *testing.T, members int) {
 	defer testutil.AfterTest(t)
-	c := NewCluster(t, 5)
+	c := NewCluster(t, members)
 
 	for _, m := range c.Members {
 		m.SnapCount = 10
@@ -247,7 +253,7 @@ func TestIssue2746(t *testing.T) {
 		clusterMustProgress(t, c.Members)
 	}
 
-	c.RemoveMember(t, uint64(c.Members[4].s.ID()))
+	c.RemoveMember(t, uint64(c.Members[members-1].s.ID()))
 	c.waitLeader(t, c.Members)
 
 	c.AddMember(t)
@@ -267,7 +273,7 @@ func TestIssue2904(t *testing.T) {
 	c.Members[1].Stop(t)
 
 	// send remove member-1 request to the cluster.
-	cc := mustNewHTTPClient(t, c.URLs(), nil)
+	cc := MustNewHTTPClient(t, c.URLs(), nil)
 	ma := client.NewMembersAPI(cc)
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	// the proposal is not committed because member 1 is stopped, but the
@@ -301,7 +307,6 @@ func TestIssue3699(t *testing.T) {
 
 	// make node a unavailable
 	c.Members[0].Stop(t)
-	<-c.Members[0].s.StopNotify()
 
 	// add node d
 	c.AddMember(t)
@@ -317,31 +322,35 @@ func TestIssue3699(t *testing.T) {
 
 	// bring back node a
 	// node a will remain useless as long as d is the leader.
-	err := c.Members[0].Restart(t)
+	if err := c.Members[0].Restart(t); err != nil {
+		t.Fatal(err)
+	}
 	select {
+	// waiting for ReadyNotify can take several seconds
+	case <-time.After(10 * time.Second):
+		t.Fatalf("waited too long for ready notification")
 	case <-c.Members[0].s.StopNotify():
 		t.Fatalf("should not be stopped")
-	default:
+	case <-c.Members[0].s.ReadyNotify():
 	}
 	// must waitLeader so goroutines don't leak on terminate
-	leaderID = c.waitLeader(t, c.Members)
+	c.waitLeader(t, c.Members)
 
 	// try to participate in cluster
-	cc := mustNewHTTPClient(t, []string{c.URL(0)}, c.cfg.ClientTLS)
+	cc := MustNewHTTPClient(t, []string{c.URL(0)}, c.cfg.ClientTLS)
 	kapi := client.NewKeysAPI(cc)
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	_, err = kapi.Set(ctx, "/foo", "bar", nil)
-	cancel()
-	if err != nil {
+	if _, err := kapi.Set(ctx, "/foo", "bar", nil); err != nil {
 		t.Fatalf("unexpected error on Set (%v)", err)
 	}
+	cancel()
 }
 
 // clusterMustProgress ensures that cluster can make progress. It creates
 // a random key first, and check the new key could be got from all client urls
 // of the cluster.
 func clusterMustProgress(t *testing.T, membs []*member) {
-	cc := mustNewHTTPClient(t, []string{membs[0].URL()}, nil)
+	cc := MustNewHTTPClient(t, []string{membs[0].URL()}, nil)
 	kapi := client.NewKeysAPI(cc)
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	key := fmt.Sprintf("foo%d", rand.Int())
@@ -353,7 +362,7 @@ func clusterMustProgress(t *testing.T, membs []*member) {
 
 	for i, m := range membs {
 		u := m.URL()
-		mcc := mustNewHTTPClient(t, []string{u}, nil)
+		mcc := MustNewHTTPClient(t, []string{u}, nil)
 		mkapi := client.NewKeysAPI(mcc)
 		mctx, mcancel := context.WithTimeout(context.Background(), requestTimeout)
 		if _, err := mkapi.Watcher(key, &client.WatcherOptions{AfterIndex: resp.Node.ModifiedIndex - 1}).Next(mctx); err != nil {

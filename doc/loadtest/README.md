@@ -152,7 +152,7 @@ Again, we are exposing an HTTP port and exporting metrics (we will use them to f
 
 ### Doorman Server
 
-This is the the regular [doorman server](https://github.com/youtube/doorman/tree/master/go/cmd/doorman), whose address we will give to the client. The way we'll run the server differs significantly from how we would run it in a real world setting. We are running just one process. If it dies, the client won't be able to get new resource leases. For production, we would run 3 processes, and they would use [etcd](https://github.com/coreos/etcd/) to elect a leader among themselves. We are skipping this step for the sake of simplicity.
+This is the the regular [doorman server](https://github.com/flipkart-incubator/doorman/tree/master/go/cmd/doorman), whose address we will give to the client. The way we'll run the server differs significantly from how we would run it in a real world setting. We are running just one process. If it dies, the client won't be able to get new resource leases. For production, we would run 3 processes, and they would use [etcd](https://github.com/coreos/etcd/) to elect a leader among themselves. We are skipping this step for the sake of simplicity.
 
 ## Kubernetes
 
@@ -358,7 +358,7 @@ Stir things up a bit. Add more clients! A lot more clients, say, instruct the cl
 $ kubectl scale --replicas=100 replicationcontrollers doorman-client-proportional
 ```
 
-What happens with the number of requests the server is doing? How about the QPS that `target` is receiving? Is it behaving the way you expected? (Hint: if your cluster is small, and there's many clients, they will eventuall become starved for resources, and not be able to use all the capacity they got. Take a look at the [adaptive rate limiter](https://godoc.org/github.com/youtube/doorman/go/ratelimiter#AdaptiveQPS) for a workaround.) How about the client latencies? Can you make them better by giving Doorman more CPU?
+What happens with the number of requests the server is doing? How about the QPS that `target` is receiving? Is it behaving the way you expected? (Hint: if your cluster is small, and there's many clients, they will eventuall become starved for resources, and not be able to use all the capacity they got. Take a look at the [adaptive rate limiter](https://godoc.org/github.com/flipkart-incubator/doorman/go/ratelimiter#AdaptiveQPS) for a workaround.) How about the client latencies? Can you make them better by giving Doorman more CPU?
 
 ### Different Algorithms
 

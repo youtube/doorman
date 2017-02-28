@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,17 @@ import (
 	"time"
 )
 
-const snapshotCount = 10000
+const (
+	snapshotCount      = 10000
+	slowNetworkLatency = 500 // 500 millisecond
+	randomVariation    = 50
+
+	// Wait more when it recovers from slow network, because network layer
+	// needs extra time to propagate traffic control (tc command) change.
+	// Otherwise, we get different hash values from the previous revision.
+	// For more detail, please see https://github.com/coreos/etcd/issues/5121.
+	waitRecover = 5 * time.Second
+)
 
 type failure interface {
 	// Inject injeccts the failure into the testing cluster at the given
@@ -29,7 +39,7 @@ type failure interface {
 	// Recover recovers the injected failure caused by the injection of the
 	// given round and wait for the recovery of the testing cluster.
 	Recover(c *cluster, round int) error
-	// return a description of the failure
+	// Desc returns a description of the failure
 	Desc() string
 }
 
@@ -257,10 +267,7 @@ func newFailureIsolate() *failureIsolate {
 
 func (f *failureIsolate) Inject(c *cluster, round int) error {
 	i := round % c.Size
-	if err := c.Agents[i].DropPort(peerURLPort); err != nil {
-		return err
-	}
-	return nil
+	return c.Agents[i].DropPort(peerURLPort)
 }
 
 func (f *failureIsolate) Recover(c *cluster, round int) error {
@@ -296,5 +303,99 @@ func (f *failureIsolateAll) Recover(c *cluster, round int) error {
 			return err
 		}
 	}
+	return c.WaitHealth()
+}
+
+type failureSlowNetworkOneMember struct {
+	description
+}
+
+func newFailureSlowNetworkOneMember() *failureSlowNetworkOneMember {
+	desc := fmt.Sprintf("slow down one member's network by adding %d ms latency", slowNetworkLatency)
+	return &failureSlowNetworkOneMember{
+		description: description(desc),
+	}
+}
+
+func (f *failureSlowNetworkOneMember) Inject(c *cluster, round int) error {
+	i := round % c.Size
+	if err := c.Agents[i].SetLatency(slowNetworkLatency, randomVariation); err != nil {
+		c.Agents[i].RemoveLatency() // roll back
+		return err
+	}
+	return nil
+}
+
+func (f *failureSlowNetworkOneMember) Recover(c *cluster, round int) error {
+	i := round % c.Size
+	if err := c.Agents[i].RemoveLatency(); err != nil {
+		return err
+	}
+	time.Sleep(waitRecover)
+	return c.WaitHealth()
+}
+
+type failureSlowNetworkLeader struct {
+	description
+	idx int
+}
+
+func newFailureSlowNetworkLeader() *failureSlowNetworkLeader {
+	desc := fmt.Sprintf("slow down leader's network by adding %d ms latency", slowNetworkLatency)
+	return &failureSlowNetworkLeader{
+		description: description(desc),
+	}
+}
+
+func (f *failureSlowNetworkLeader) Inject(c *cluster, round int) error {
+	idx, err := c.GetLeader()
+	if err != nil {
+		return err
+	}
+	f.idx = idx
+	if err := c.Agents[idx].SetLatency(slowNetworkLatency, randomVariation); err != nil {
+		c.Agents[idx].RemoveLatency() // roll back
+		return err
+	}
+	return nil
+}
+
+func (f *failureSlowNetworkLeader) Recover(c *cluster, round int) error {
+	if err := c.Agents[f.idx].RemoveLatency(); err != nil {
+		return err
+	}
+	time.Sleep(waitRecover)
+	return c.WaitHealth()
+}
+
+type failureSlowNetworkAll struct {
+	description
+}
+
+func newFailureSlowNetworkAll() *failureSlowNetworkAll {
+	return &failureSlowNetworkAll{
+		description: "slow down all members' network",
+	}
+}
+
+func (f *failureSlowNetworkAll) Inject(c *cluster, round int) error {
+	for i, a := range c.Agents {
+		if err := a.SetLatency(slowNetworkLatency, randomVariation); err != nil {
+			for j := 0; j < i; j++ { // roll back
+				c.Agents[j].RemoveLatency()
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *failureSlowNetworkAll) Recover(c *cluster, round int) error {
+	for _, a := range c.Agents {
+		if err := a.RemoveLatency(); err != nil {
+			return err
+		}
+	}
+	time.Sleep(waitRecover)
 	return c.WaitHealth()
 }

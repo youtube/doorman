@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
-	"github.com/coreos/etcd/Godeps/_workspace/src/google.golang.org/grpc"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc"
 
 	clientv2 "github.com/coreos/etcd/client"
 	"github.com/coreos/etcd/clientv3"
@@ -89,7 +89,7 @@ func (c *cluster) Bootstrap() error {
 		if err != nil {
 			return err
 		}
-		grpcURLs[i] = fmt.Sprintf("%s:2378", host)
+		grpcURLs[i] = fmt.Sprintf("%s:2379", host)
 		clientURLs[i] = fmt.Sprintf("http://%s:2379", host)
 		peerURLs[i] = fmt.Sprintf("http://%s:%d", host, peerURLPort)
 
@@ -113,12 +113,6 @@ func (c *cluster) Bootstrap() error {
 			"--initial-cluster", clusterStr,
 			"--initial-cluster-state", "new",
 		}
-		if !c.v2Only {
-			flags = append(flags,
-				"--experimental-v3demo",
-				"--experimental-gRPC-addr", grpcURLs[i],
-			)
-		}
 
 		if _, err := a.Start(flags...); err != nil {
 			// cleanup
@@ -129,6 +123,9 @@ func (c *cluster) Bootstrap() error {
 		}
 	}
 
+	// TODO: Too intensive stressers can panic etcd member with
+	// 'out of memory' error. Put rate limits in server side.
+	stressN := 100
 	var stressers []Stresser
 	if c.v2Only {
 		for _, u := range clientURLs {
@@ -136,7 +133,7 @@ func (c *cluster) Bootstrap() error {
 				Endpoint:       u,
 				KeySize:        c.stressKeySize,
 				KeySuffixRange: c.stressKeySuffixRange,
-				N:              200,
+				N:              stressN,
 			}
 			go s.Stress()
 			stressers = append(stressers, s)
@@ -147,7 +144,7 @@ func (c *cluster) Bootstrap() error {
 				Endpoint:       u,
 				KeySize:        c.stressKeySize,
 				KeySuffixRange: c.stressKeySuffixRange,
-				N:              200,
+				N:              stressN,
 			}
 			go s.Stress()
 			stressers = append(stressers, s)
@@ -178,6 +175,7 @@ func (c *cluster) WaitHealth() error {
 		if err == nil {
 			return nil
 		}
+		plog.Warningf("#%d setHealthKey error (%v)", i, err)
 		time.Sleep(time.Second)
 	}
 	return err
@@ -188,24 +186,27 @@ func (c *cluster) GetLeader() (int, error) {
 	if c.v2Only {
 		return 0, nil
 	}
-	cli, err := clientv3.New(clientv3.Config{
-		Endpoints:   c.GRPCURLs,
-		DialTimeout: 5 * time.Second,
-	})
-	if err != nil {
-		return 0, err
-	}
-	defer cli.Close()
-	clus := clientv3.NewCluster(cli)
-	mem, err := clus.MemberLeader(context.Background())
-	if err != nil {
-		return 0, err
-	}
-	for i, name := range c.Names {
-		if name == mem.Name {
+
+	for i, ep := range c.GRPCURLs {
+		cli, err := clientv3.New(clientv3.Config{
+			Endpoints:   []string{ep},
+			DialTimeout: 5 * time.Second,
+		})
+		if err != nil {
+			return 0, err
+		}
+		defer cli.Close()
+
+		mapi := clientv3.NewMaintenance(cli)
+		resp, err := mapi.Status(context.Background(), ep)
+		if err != nil {
+			return 0, err
+		}
+		if resp.Header.MemberId == resp.Leader {
 			return i, nil
 		}
 	}
+
 	return 0, fmt.Errorf("no leader found")
 }
 
@@ -271,7 +272,7 @@ func setHealthKey(us []string) error {
 		cancel()
 		conn.Close()
 		if err != nil {
-			return err
+			return fmt.Errorf("%v (%s)", err, u)
 		}
 	}
 	return nil
@@ -306,9 +307,9 @@ func (c *cluster) getRevisionHash() (map[string]int64, map[string]int64, error) 
 		if err != nil {
 			return nil, nil, err
 		}
-		kvc := pb.NewKVClient(conn)
+		m := pb.NewMaintenanceClient(conn)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		resp, err := kvc.Hash(ctx, &pb.HashRequest{})
+		resp, err := m.Hash(ctx, &pb.HashRequest{})
 		cancel()
 		conn.Close()
 		if err != nil {
@@ -320,24 +321,84 @@ func (c *cluster) getRevisionHash() (map[string]int64, map[string]int64, error) 
 	return revs, hashes, nil
 }
 
-func (c *cluster) compactKV(rev int64) error {
-	var (
-		conn *grpc.ClientConn
-		err  error
-	)
-	for _, u := range c.GRPCURLs {
-		conn, err = grpc.Dial(u, grpc.WithInsecure(), grpc.WithTimeout(5*time.Second))
-		if err != nil {
+func (c *cluster) compactKV(rev int64, timeout time.Duration) (err error) {
+	if rev <= 0 {
+		return nil
+	}
+
+	for i, u := range c.GRPCURLs {
+		conn, derr := grpc.Dial(u, grpc.WithInsecure(), grpc.WithTimeout(5*time.Second))
+		if derr != nil {
+			plog.Printf("[compact kv #%d] dial error %v (endpoint %s)", i, derr, u)
+			err = derr
 			continue
 		}
 		kvc := pb.NewKVClient(conn)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_, err = kvc.Compact(ctx, &pb.CompactionRequest{Revision: rev})
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		plog.Printf("[compact kv #%d] starting (endpoint %s)", i, u)
+		_, cerr := kvc.Compact(ctx, &pb.CompactionRequest{Revision: rev, Physical: true})
 		cancel()
 		conn.Close()
-		if err == nil {
-			return nil
+		succeed := true
+		if cerr != nil {
+			if strings.Contains(cerr.Error(), "required revision has been compacted") && i > 0 {
+				plog.Printf("[compact kv #%d] already compacted (endpoint %s)", i, u)
+			} else {
+				plog.Warningf("[compact kv #%d] error %v (endpoint %s)", i, cerr, u)
+				err = cerr
+				succeed = false
+			}
+		}
+		if succeed {
+			plog.Printf("[compact kv #%d] done (endpoint %s)", i, u)
 		}
 	}
 	return err
+}
+
+func (c *cluster) checkCompact(rev int64) error {
+	if rev == 0 {
+		return nil
+	}
+	for _, u := range c.GRPCURLs {
+		cli, err := clientv3.New(clientv3.Config{
+			Endpoints:   []string{u},
+			DialTimeout: 5 * time.Second,
+		})
+		if err != nil {
+			return fmt.Errorf("%v (endpoint %s)", err, u)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		wch := cli.Watch(ctx, "\x00", clientv3.WithFromKey(), clientv3.WithRev(rev-1))
+		wr, ok := <-wch
+		cancel()
+
+		cli.Close()
+
+		if !ok {
+			return fmt.Errorf("watch channel terminated (endpoint %s)", u)
+		}
+		if wr.CompactRevision != rev {
+			return fmt.Errorf("got compact revision %v, wanted %v (endpoint %s)", wr.CompactRevision, rev, u)
+		}
+	}
+	return nil
+}
+
+func (c *cluster) defrag() error {
+	for _, u := range c.GRPCURLs {
+		plog.Printf("defragmenting %s\n", u)
+		conn, err := grpc.Dial(u, grpc.WithInsecure(), grpc.WithTimeout(5*time.Second))
+		if err != nil {
+			return err
+		}
+		mt := pb.NewMaintenanceClient(conn)
+		if _, err = mt.Defragment(context.Background(), &pb.DefragmentRequest{}); err != nil {
+			return err
+		}
+		conn.Close()
+		plog.Printf("defragmented %s\n", u)
+	}
+	return nil
 }

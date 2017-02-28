@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,14 +17,10 @@ package clientv3
 import (
 	"testing"
 	"time"
-
-	"github.com/coreos/etcd/pkg/testutil"
 )
 
 func TestTxnPanics(t *testing.T) {
-	defer testutil.AfterTest(t)
-
-	kv := NewKV(&Client{})
+	kv := &kv{}
 
 	errc := make(chan string)
 	df := func() {
@@ -33,7 +29,7 @@ func TestTxnPanics(t *testing.T) {
 		}
 	}
 
-	cmp := Compare(CreatedRevision("foo"), "=", 0)
+	cmp := Compare(CreateRevision("foo"), "=", 0)
 	op := OpPut("foo", "bar")
 
 	tests := []struct {

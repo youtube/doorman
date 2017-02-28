@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 package rafthttp
 
 import (
+	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -24,11 +25,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/go-semver/semver"
 	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/version"
+	"github.com/coreos/go-semver/semver"
 )
 
 var (
@@ -38,8 +39,8 @@ var (
 
 // NewListener returns a listener for raft message transfer between peers.
 // It uses timeout listener to identify broken streams promptly.
-func NewListener(u url.URL, tlsInfo transport.TLSInfo) (net.Listener, error) {
-	return transport.NewTimeoutListener(u.Host, u.Scheme, tlsInfo, ConnReadTimeout, ConnWriteTimeout)
+func NewListener(u url.URL, tlscfg *tls.Config) (net.Listener, error) {
+	return transport.NewTimeoutListener(u.Host, u.Scheme, tlscfg, ConnReadTimeout, ConnWriteTimeout)
 }
 
 // NewRoundTripper returns a roundTripper used to send requests
@@ -196,9 +197,9 @@ func setPeerURLsHeader(req *http.Request, urls types.URLs) {
 		// often not set in unit tests
 		return
 	}
-	var peerURLs []string
-	for _, url := range urls {
-		peerURLs = append(peerURLs, url.String())
+	peerURLs := make([]string, urls.Len())
+	for i := range urls {
+		peerURLs[i] = urls[i].String()
 	}
 	req.Header.Set("X-PeerURLs", strings.Join(peerURLs, ","))
 }

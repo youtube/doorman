@@ -20,11 +20,11 @@ package connection
 import (
 	"time"
 
+	"doorman/go/timeutil"
 	log "github.com/golang/glog"
-	"github.com/youtube/doorman/go/timeutil"
 	rpc "google.golang.org/grpc"
 
-	pb "github.com/youtube/doorman/proto/doorman"
+	pb "doorman/proto/doorman"
 )
 
 const (
@@ -188,12 +188,12 @@ func (connection *Connection) runMasterAware(callback func() (HasMastership, err
 		// If there was a mastership message we check it for presence of the
 		// master_bns field. If there is none then the server does not know
 		// who the master is. In that case we need to retry.
-		if mastership.MasterAddress == nil {
+		if mastership.MasterAddress == "" {
 			log.Warningf("%v is not the master, and does not know who the master is", connection.currentMaster)
 			continue
 		}
 
-		newMaster := mastership.GetMasterAddress()
+		newMaster := mastership.MasterAddress
 
 		// This should not happen, because if the server does not know who the master is
 		// it should signify that through the absence of the master_bns field, but why

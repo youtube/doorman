@@ -1,10 +1,10 @@
-// Copyright 2014 Google Inc. All Rights Reserved.
+// Copyright 2014 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//      http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -31,6 +31,7 @@ const (
 type result struct {
 	errStr   string
 	duration time.Duration
+	happened time.Time
 }
 
 type report struct {
@@ -46,6 +47,8 @@ type report struct {
 
 	errorDist map[string]int
 	lats      []float64
+
+	sps *secondPoints
 }
 
 func printReport(results chan result) <-chan struct{} {
@@ -53,6 +56,7 @@ func printReport(results chan result) <-chan struct{} {
 		r := &report{
 			results:   results,
 			errorDist: make(map[string]int),
+			sps:       newSecondPoints(),
 		}
 		r.finalize()
 		r.print()
@@ -64,6 +68,7 @@ func printRate(results chan result) <-chan struct{} {
 		r := &report{
 			results:   results,
 			errorDist: make(map[string]int),
+			sps:       newSecondPoints(),
 		}
 		r.finalize()
 		fmt.Printf(" Requests/sec:\t%4.4f\n", r.rps)
@@ -85,6 +90,7 @@ func (r *report) finalize() {
 		if res.errStr != "" {
 			r.errorDist[res.errStr]++
 		} else {
+			r.sps.Add(res.happened, res.duration)
 			r.lats = append(r.lats, res.duration.Seconds())
 			r.avgTotal += res.duration.Seconds()
 		}
@@ -115,6 +121,9 @@ func (r *report) print() {
 		fmt.Printf("  Requests/sec:\t%4.4f\n", r.rps)
 		r.printHistogram()
 		r.printLatencies()
+		if sample {
+			r.printSecondSample()
+		}
 	}
 
 	if len(r.errorDist) > 0 {
@@ -140,6 +149,10 @@ func (r *report) printLatencies() {
 			fmt.Printf("  %v%% in %4.4f secs.\n", pctls[i], data[i])
 		}
 	}
+}
+
+func (r *report) printSecondSample() {
+	fmt.Println(r.sps.getTimeSeries())
 }
 
 func (r *report) printHistogram() {

@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,14 +18,14 @@ import (
 	"log"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	"github.com/coreos/etcd/clientv3"
+	"golang.org/x/net/context"
 )
 
 var (
 	dialTimeout    = 5 * time.Second
 	requestTimeout = 1 * time.Second
-	endpoints      = []string{"localhost:12378", "localhost:22378", "http://localhost:32380"}
+	endpoints      = []string{"localhost:2379", "localhost:22379", "localhost:32379"}
 )
 
 func Example() {

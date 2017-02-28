@@ -1,27 +1,27 @@
 package readline
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
-
-	"github.com/chzyer/readline/runes"
 )
 
 type AutoCompleter interface {
 	// Readline will pass the whole line and current offset to it
 	// Completer need to pass all the candidates, and how long they shared the same characters in line
 	// Example:
+	//   [go, git, git-shell, grep]
 	//   Do("g", 1) => ["o", "it", "it-shell", "rep"], 1
-	//   Do("gi", 2) => ["t", "t-shell"], 1
-	//   Do("git", 3) => ["", "-shell"], 0
+	//   Do("gi", 2) => ["t", "t-shell"], 2
+	//   Do("git", 3) => ["", "-shell"], 3
 	Do(line []rune, pos int) (newLine [][]rune, length int)
 }
 
 type opCompleter struct {
-	w  io.Writer
-	op *Operation
-	ac AutoCompleter
+	w     io.Writer
+	op    *Operation
+	width int
 
 	inCompleteMode  bool
 	inSelectMode    bool
@@ -32,11 +32,11 @@ type opCompleter struct {
 	candidateColNum int
 }
 
-func newOpCompleter(w io.Writer, op *Operation) *opCompleter {
+func newOpCompleter(w io.Writer, op *Operation, width int) *opCompleter {
 	return &opCompleter{
-		w:  w,
-		op: op,
-		ac: op.cfg.AutoComplete,
+		w:     w,
+		op:    op,
+		width: width,
 	}
 }
 
@@ -67,7 +67,7 @@ func (o *opCompleter) OnComplete() {
 	buf := o.op.buf
 	rs := buf.Runes()
 
-	if o.IsInCompleteMode() && runes.Equal(rs, o.candidateSource) {
+	if o.IsInCompleteMode() && o.candidateSource != nil && runes.Equal(rs, o.candidateSource) {
 		o.EnterCompleteSelectMode()
 		o.doSelect()
 		return
@@ -75,7 +75,7 @@ func (o *opCompleter) OnComplete() {
 
 	o.ExitCompleteSelectMode()
 	o.candidateSource = rs
-	newLines, offset := o.ac.Do(rs, buf.idx)
+	newLines, offset := o.op.cfg.AutoComplete.Do(rs, buf.idx)
 	if len(newLines) == 0 {
 		o.ExitCompleteMode(false)
 		return
@@ -171,6 +171,10 @@ func (o *opCompleter) getMatrixSize() int {
 	return line * o.candidateColNum
 }
 
+func (o *opCompleter) OnWidthChange(newWidth int) {
+	o.width = newWidth
+}
+
 func (o *opCompleter) CompleteRefresh() {
 	if !o.inCompleteMode {
 		return
@@ -183,11 +187,18 @@ func (o *opCompleter) CompleteRefresh() {
 			colWidth = w
 		}
 	}
-	colNum := getWidth(o.op.cfg.StdoutFd) / (colWidth + o.candidateOff + 2)
-	o.candidateColNum = colNum
-	buf := bytes.NewBuffer(nil)
-	buf.Write(bytes.Repeat([]byte("\n"), lineCnt))
+	colWidth += o.candidateOff + 1
 	same := o.op.buf.RuneSlice(-o.candidateOff)
+
+	// -1 to avoid reach the end of line
+	width := o.width - 1
+	colNum := width / colWidth
+	colWidth += (width - (colWidth * colNum)) / colNum
+
+	o.candidateColNum = colNum
+	buf := bufio.NewWriter(o.w)
+	buf.Write(bytes.Repeat([]byte("\n"), lineCnt))
+
 	colIdx := 0
 	lines := 1
 	buf.WriteString("\033[J")
@@ -199,11 +210,11 @@ func (o *opCompleter) CompleteRefresh() {
 		buf.WriteString(string(same))
 		buf.WriteString(string(c))
 		buf.Write(bytes.Repeat([]byte(" "), colWidth-len(c)))
+
 		if inSelect {
 			buf.WriteString("\033[0m")
 		}
 
-		buf.WriteString("  ")
 		colIdx++
 		if colIdx == colNum {
 			buf.WriteString("\n")
@@ -215,7 +226,7 @@ func (o *opCompleter) CompleteRefresh() {
 	// move back
 	fmt.Fprintf(buf, "\033[%dA\r", lineCnt-1+lines)
 	fmt.Fprintf(buf, "\033[%dC", o.op.buf.idx+o.op.buf.PromptLen())
-	o.w.Write(buf.Bytes())
+	buf.Flush()
 }
 
 func (o *opCompleter) aggCandidate(candidate [][]rune) int {

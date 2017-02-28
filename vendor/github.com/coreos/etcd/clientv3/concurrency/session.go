@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,14 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package concurrency
 
 import (
 	"sync"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	v3 "github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/lease"
+	"golang.org/x/net/context"
 )
 
 // only keep one ephemeral lease per client
@@ -35,7 +35,7 @@ type clientSessionMgr struct {
 // Fault-tolerant applications may use sessions to reason about liveness.
 type Session struct {
 	client *v3.Client
-	id     lease.LeaseID
+	id     v3.LeaseID
 
 	cancel context.CancelFunc
 	donec  <-chan struct{}
@@ -49,13 +49,13 @@ func NewSession(client *v3.Client) (*Session, error) {
 		return s, nil
 	}
 
-	resp, err := client.Create(context.TODO(), sessionTTL)
+	resp, err := client.Grant(client.Ctx(), sessionTTL)
 	if err != nil {
 		return nil, err
 	}
-	id := lease.LeaseID(resp.ID)
+	id := v3.LeaseID(resp.ID)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(client.Ctx())
 	keepAlive, err := client.KeepAlive(ctx, id)
 	if err != nil || keepAlive == nil {
 		return nil, err
@@ -82,7 +82,7 @@ func NewSession(client *v3.Client) (*Session, error) {
 }
 
 // Lease is the lease ID for keys bound to the session.
-func (s *Session) Lease() lease.LeaseID { return s.id }
+func (s *Session) Lease() v3.LeaseID { return s.id }
 
 // Done returns a channel that closes when the lease is orphaned, expires, or
 // is otherwise no longer being refreshed.
@@ -99,6 +99,6 @@ func (s *Session) Orphan() {
 // Close orphans the session and revokes the session lease.
 func (s *Session) Close() error {
 	s.Orphan()
-	_, err := s.client.Revoke(context.TODO(), s.id)
+	_, err := s.client.Revoke(s.client.Ctx(), s.id)
 	return err
 }

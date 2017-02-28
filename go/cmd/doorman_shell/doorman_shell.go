@@ -28,11 +28,11 @@ import (
 	"strconv"
 	"sync"
 
+	"doorman/go/client/doorman"
 	"github.com/chzyer/readline"
 	log "github.com/golang/glog"
 	"github.com/google/shlex"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/youtube/doorman/go/client/doorman"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -227,11 +227,11 @@ func (client *Multiclient) Eval(command []string) error {
 		}
 		clientID, resourceID := tail[0], tail[1]
 		return client.Release(clientID, resourceID)
-  case "master":
-    for k, v := range client.clients {
-      fmt.Printf("%s: %s\n", k, v.GetMaster())
-    }
-    return nil
+	case "master":
+		for k, v := range client.clients {
+			fmt.Printf("%s: %s\n", k, v.GetMaster())
+		}
+		return nil
 	case "help":
 		fmt.Fprintln(os.Stderr, help)
 		return nil
@@ -270,7 +270,7 @@ func main() {
 
 	var opts []grpc.DialOption
 	if len(*caFile) != 0 {
-		var creds credentials.TransportAuthenticator
+		var creds credentials.TransportCredentials
 		var err error
 		creds, err = credentials.NewClientTLSFromFile(*caFile, "")
 		if err != nil {

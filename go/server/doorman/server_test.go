@@ -19,42 +19,41 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"golang.org/x/net/context"
 	rpc "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
-	pb "github.com/youtube/doorman/proto/doorman"
+	pb "doorman/proto/doorman"
 )
 
 func TestValidateGetCapacityRequest(t *testing.T) {
 	invalid := []*pb.GetCapacityRequest{
 		// No ClientId.
 		{
-			ClientId: proto.String(""),
+			ClientId: string(""),
 			Resource: nil,
 		},
 		// No ResourceId.
 		{
-			ClientId: proto.String("client"),
+			ClientId: string("client"),
 			Resource: []*pb.ResourceRequest{
 				{
-					ResourceId: proto.String(""),
-					Priority:   proto.Int64(1),
+					ResourceId: string(""),
+					Priority:   int64(1),
 					Has:        new(pb.Lease),
-					Wants:      proto.Float64(1),
+					Wants:      float64(1),
 				},
 			},
 		},
 		// Requests negative capacity.
 		{
-			ClientId: proto.String("client"),
+			ClientId: string("client"),
 			Resource: []*pb.ResourceRequest{
 				{
-					ResourceId: proto.String("resource"),
-					Priority:   proto.Int64(1),
+					ResourceId: string("resource"),
+					Priority:   int64(1),
 					Has:        new(pb.Lease),
-					Wants:      proto.Float64(-10),
+					Wants:      float64(-10),
 				},
 			},
 		},
@@ -81,39 +80,39 @@ func TestValidateResourceRepository(t *testing.T) {
 		[]*pb.ResourceTemplate{}, // empty repo
 		[]*pb.ResourceTemplate{ // no *
 			{
-				IdentifierGlob: proto.String("foo"),
-				Capacity:       proto.Float64(10.0),
+				IdentifierGlob: string("foo"),
+				Capacity:       float64(10.0),
 			},
 		},
 		[]*pb.ResourceTemplate{ // no algorithm for *
 			{
-				IdentifierGlob: proto.String("*"),
-				Capacity:       proto.Float64(10.0),
+				IdentifierGlob: string("*"),
+				Capacity:       float64(10.0),
 			},
 		},
 		[]*pb.ResourceTemplate{ // * is not the last template
 			{
-				IdentifierGlob: proto.String("*"),
-				Capacity:       proto.Float64(10.0),
+				IdentifierGlob: string("*"),
+				Capacity:       float64(10.0),
 				Algorithm: &pb.Algorithm{
-					Kind: pb.Algorithm_PROPORTIONAL_SHARE.Enum(),
+					Kind: pb.Algorithm_PROPORTIONAL_SHARE,
 				},
 			},
 			{
-				IdentifierGlob: proto.String("foo"),
-				Capacity:       proto.Float64(10.0),
+				IdentifierGlob: string("foo"),
+				Capacity:       float64(10.0),
 			},
 		},
 		[]*pb.ResourceTemplate{ // malformed glob
 			{
-				IdentifierGlob: proto.String("[*-]"),
-				Capacity:       proto.Float64(10.0),
+				IdentifierGlob: string("[*-]"),
+				Capacity:       float64(10.0),
 			},
 			{
-				IdentifierGlob: proto.String("*"),
-				Capacity:       proto.Float64(10.0),
+				IdentifierGlob: string("*"),
+				Capacity:       float64(10.0),
 				Algorithm: &pb.Algorithm{
-					Kind: pb.Algorithm_PROPORTIONAL_SHARE.Enum(),
+					Kind: pb.Algorithm_PROPORTIONAL_SHARE,
 				},
 			},
 		},
@@ -164,13 +163,13 @@ func setUpIntermediate(name string, addr string) (fixture, error) {
 	fix.server, err = MakeTestIntermediateServer(
 		name, addr,
 		&pb.ResourceTemplate{
-			IdentifierGlob: proto.String("*"),
-			Capacity:       proto.Float64(100),
-			SafeCapacity:   proto.Float64(2),
+			IdentifierGlob: string("*"),
+			Capacity:       float64(100),
+			SafeCapacity:   float64(2),
 			Algorithm: &pb.Algorithm{
-				Kind:            pb.Algorithm_PROPORTIONAL_SHARE.Enum(),
-				RefreshInterval: proto.Int64(1),
-				LeaseLength:     proto.Int64(2),
+				Kind:            pb.Algorithm_PROPORTIONAL_SHARE,
+				RefreshInterval: int64(1),
+				LeaseLength:     int64(2),
 			},
 		})
 	if err != nil {
@@ -201,26 +200,26 @@ func setUpIntermediate(name string, addr string) (fixture, error) {
 
 func makeRequest(fix fixture, wants, has float64) (*pb.GetCapacityResponse, error) {
 	req := &pb.GetCapacityRequest{
-		ClientId: proto.String("client"),
+		ClientId: string("client"),
 		Resource: []*pb.ResourceRequest{
 			{
-				ResourceId: proto.String("resource"),
-				Priority:   proto.Int64(1),
+				ResourceId: string("resource"),
+				Priority:   int64(1),
 				Has: &pb.Lease{
-					ExpiryTime:      proto.Int64(0),
-					RefreshInterval: proto.Int64(0),
-					Capacity:        proto.Float64(0),
+					ExpiryTime:      int64(0),
+					RefreshInterval: int64(0),
+					Capacity:        float64(0),
 				},
-				Wants: proto.Float64(wants),
+				Wants: float64(wants),
 			},
 		},
 	}
 
 	if has > 0 {
 		req.Resource[0].Has = &pb.Lease{
-			ExpiryTime:      proto.Int64(time.Now().Add(1 * time.Minute).Unix()),
-			RefreshInterval: proto.Int64(5),
-			Capacity:        proto.Float64(has),
+			ExpiryTime:      int64(time.Now().Add(1 * time.Minute).Unix()),
+			RefreshInterval: int64(5),
+			Capacity:        float64(has),
 		}
 	}
 
@@ -236,21 +235,21 @@ func makeServerRequest(fix fixture, resID string, clients []clientWants, has flo
 	var wants []*pb.PriorityBandAggregate
 	for _, client := range clients {
 		wants = append(wants, &pb.PriorityBandAggregate{
-			Priority:   proto.Int64(0),
-			NumClients: proto.Int64(client.numClients),
-			Wants:      proto.Float64(client.wants),
+			Priority:   int64(0),
+			NumClients: int64(client.numClients),
+			Wants:      float64(client.wants),
 		})
 	}
 
 	req := &pb.GetServerCapacityRequest{
-		ServerId: proto.String("server"),
+		ServerId: string("server"),
 		Resource: []*pb.ServerCapacityResourceRequest{
 			{
-				ResourceId: proto.String(resID),
+				ResourceId: string(resID),
 				Has: &pb.Lease{
-					ExpiryTime:      proto.Int64(0),
-					RefreshInterval: proto.Int64(0),
-					Capacity:        proto.Float64(0),
+					ExpiryTime:      int64(0),
+					RefreshInterval: int64(0),
+					Capacity:        float64(0),
 				},
 				Wants: wants,
 			},
@@ -259,9 +258,9 @@ func makeServerRequest(fix fixture, resID string, clients []clientWants, has flo
 
 	if has > 0 {
 		req.Resource[0].Has = &pb.Lease{
-			ExpiryTime:      proto.Int64(time.Now().Add(1 * time.Minute).Unix()),
-			RefreshInterval: proto.Int64(1),
-			Capacity:        proto.Float64(has),
+			ExpiryTime:      int64(time.Now().Add(1 * time.Minute).Unix()),
+			RefreshInterval: int64(1),
+			Capacity:        float64(has),
 		}
 	}
 
@@ -300,8 +299,8 @@ func TestMastership(t *testing.T) {
 		t.Error("non-master should have information about the master")
 	}
 
-	if got, want := out.Mastership.GetMasterAddress(), "somebody-that-i-used-to-know"; got != want {
-		t.Errorf("out.Mastership.GetMasterAddress() = %q, want %q", got, want)
+	if got, want := out.Mastership.MasterAddress, "somebody-that-i-used-to-know"; got != want {
+		t.Errorf("out.Mastership.MasterAddress = %q, want %q", got, want)
 	}
 }
 
@@ -331,7 +330,7 @@ func TestMasterNotAvailable(t *testing.T) {
 	if res.Mastership == nil {
 		t.Fatalf("fix.client.GetCapacity(_,_) = %v,_; did not contain a mastership field", res)
 	}
-	if res.Mastership.GetMasterAddress() != "foo" {
+	if res.Mastership.MasterAddress != "foo" {
 		t.Fatalf("fix.client.GetCapacity(_,_) = %v,_; did not contain the correct new master", res)
 	}
 }
@@ -352,16 +351,16 @@ func TestLearningMode(t *testing.T) {
 		return
 	}
 	lease := out.Response[0].Gets
-	if got, want := lease.GetCapacity(), 20.0; got != want {
-		t.Errorf("lease.GetCapacity() = %v, want %v", got, want)
+	if got, want := lease.Capacity, 20.0; got != want {
+		t.Errorf("lease.Capacity = %v, want %v", got, want)
 	}
 
 	out, err = makeRequest(fix, 90, 90)
 	lease = out.Response[0].Gets
 
 	// We are still in learning mode: the server has overassigned.
-	if got, want := lease.GetCapacity(), 90.0; got != want {
-		t.Errorf("lease.GetCapacity() = %v, want %v", got, want)
+	if got, want := lease.Capacity, 90.0; got != want {
+		t.Errorf("lease.Capacity = %v, want %v", got, want)
 	}
 
 	// Resets the server's start time to 10 minutes in the past and drops the servers
@@ -376,8 +375,8 @@ func TestLearningMode(t *testing.T) {
 
 	// Not in learning mode: the lease should be corrected to
 	// avoid overassignment.
-	if got, want := lease.GetCapacity(), 100.0; got != want {
-		t.Errorf("lease.GetCapacity() = %v, want %v", got, want)
+	if got, want := lease.Capacity, 100.0; got != want {
+		t.Errorf("lease.Capacity = %v, want %v", got, want)
 	}
 }
 
@@ -393,7 +392,7 @@ func TestEmptyRequest(t *testing.T) {
 	if res, err := fix.client.GetCapacity(
 		context.Background(),
 		&pb.GetCapacityRequest{
-			ClientId: proto.String("client"),
+			ClientId: string("client"),
 		}); err != nil {
 		t.Fatalf("fix.client.GetCapacity: %v", err)
 	} else if len(res.Response) != 0 {
@@ -418,7 +417,7 @@ func TestReleaseCapacity(t *testing.T) {
 	_, err = fix.client.ReleaseCapacity(
 		context.Background(),
 		&pb.ReleaseCapacityRequest{
-			ClientId: proto.String("client"),
+			ClientId: string("client"),
 			ResourceId: []string{
 				"resource",
 				"nonexisting_resource",
@@ -455,13 +454,13 @@ func TestLoadConfig(t *testing.T) {
 	if err := fix.server.LoadConfig(context.Background(), &pb.ResourceRepository{
 		Resources: []*pb.ResourceTemplate{
 			{
-				IdentifierGlob: proto.String("*"),
-				Capacity:       proto.Float64(100.0),
+				IdentifierGlob: string("*"),
+				Capacity:       float64(100.0),
 				Algorithm: &pb.Algorithm{
-					Kind:                 pb.Algorithm_NO_ALGORITHM.Enum(),
-					RefreshInterval:      proto.Int64(5),
-					LeaseLength:          proto.Int64(20),
-					LearningModeDuration: proto.Int64(0),
+					Kind:                 pb.Algorithm_NO_ALGORITHM,
+					RefreshInterval:      int64(5),
+					LeaseLength:          int64(20),
+					LearningModeDuration: int64(0),
 				},
 			},
 		},
@@ -474,9 +473,9 @@ func TestLoadConfig(t *testing.T) {
 		t.Fatalf("s.GetCapacity: %v", err)
 	}
 
-	lease := out.Response[0].GetGets()
-	if got, want := lease.GetCapacity(), 20.0; got != want {
-		t.Errorf("lease.GetCapacity() = %v, want %v", got, want)
+	lease := out.Response[0].Gets
+	if got, want := lease.Capacity, 20.0; got != want {
+		t.Errorf("lease.Capacity = %v, want %v", got, want)
 	}
 }
 
@@ -497,7 +496,7 @@ func TestWrongNumberOfClients(t *testing.T) {
 
 	_, err = makeServerRequest(fix, "resource", clients, 0)
 	if got, want := rpc.Code(err), codes.InvalidArgument; got != want {
-		t.Errorf("s.GetServerCapacity() = %v, want %v", got, want)
+		t.Errorf("s.ServerCapacity = %v, want %v", got, want)
 		return
 	}
 }
@@ -517,13 +516,13 @@ func TestGetServerCapacity(t *testing.T) {
 	if err := fix.server.LoadConfig(context.Background(), &pb.ResourceRepository{
 		Resources: []*pb.ResourceTemplate{
 			{
-				IdentifierGlob: proto.String("*"),
-				Capacity:       proto.Float64(capacity),
+				IdentifierGlob: string("*"),
+				Capacity:       float64(capacity),
 				Algorithm: &pb.Algorithm{
-					Kind:                 pb.Algorithm_FAIR_SHARE.Enum(),
-					RefreshInterval:      proto.Int64(5),
-					LeaseLength:          proto.Int64(20),
-					LearningModeDuration: proto.Int64(0),
+					Kind:                 pb.Algorithm_FAIR_SHARE,
+					RefreshInterval:      int64(5),
+					LeaseLength:          int64(20),
+					LearningModeDuration: int64(-1),
 				},
 			},
 		},
@@ -545,9 +544,9 @@ func TestGetServerCapacity(t *testing.T) {
 	}
 
 	// We expect to receive the maximum available capacity.
-	lease := out.Response[0].GetGets()
-	if got, want := lease.GetCapacity(), capacity; got != want {
-		t.Errorf("lease.GetCapacity() = %v, want %v", got, want)
+	lease := out.Response[0].Gets
+	if got, want := lease.Capacity, capacity; got != want {
+		t.Errorf("lease.Capacity = %v, want %v", got, want)
 	}
 
 }
@@ -588,13 +587,13 @@ func TestIntermediateServerUpdate(t *testing.T) {
 	if err := fixRoot.server.LoadConfig(context.Background(), &pb.ResourceRepository{
 		Resources: []*pb.ResourceTemplate{
 			{
-				IdentifierGlob: proto.String("*"),
-				Capacity:       proto.Float64(capacity),
+				IdentifierGlob: string("*"),
+				Capacity:       float64(capacity),
 				Algorithm: &pb.Algorithm{
-					Kind:                 pb.Algorithm_FAIR_SHARE.Enum(),
-					RefreshInterval:      proto.Int64(1),
-					LeaseLength:          proto.Int64(2),
-					LearningModeDuration: proto.Int64(0),
+					Kind:                 pb.Algorithm_FAIR_SHARE,
+					RefreshInterval:      int64(1),
+					LeaseLength:          int64(2),
+					LearningModeDuration: int64(-1),
 				},
 			},
 		},
@@ -602,10 +601,10 @@ func TestIntermediateServerUpdate(t *testing.T) {
 		t.Fatalf("fix.server.LoadConfig: %v", err)
 	}
 
-	// To avoid waiting for the learning mode's end time, set it to zero.
-	*defaultResourceTemplate.Algorithm.LearningModeDuration = 0
-	*defaultResourceTemplate.Algorithm.RefreshInterval = 1
-	*defaultResourceTemplate.Algorithm.LeaseLength = 2
+	// To avoid waiting for the learning mode's end time, make it less than zero.
+	defaultResourceTemplate.Algorithm.LearningModeDuration = -1
+	defaultResourceTemplate.Algorithm.RefreshInterval = 1
+	defaultResourceTemplate.Algorithm.LeaseLength = 2
 
 	fixIntermediate, err := setUpIntermediate("testIntermediate", fixRoot.Addr())
 	if err != nil {
@@ -630,9 +629,9 @@ func TestIntermediateServerUpdate(t *testing.T) {
 	// We expect to receive zero capacity, because intermediate server
 	// has not yet asked a lower-level server to assign a lease for this
 	// resource.
-	lease := out.Response[0].GetGets()
-	if got, want := lease.GetCapacity(), 0.0; got != want {
-		t.Errorf("lease.GetCapacity() = %v, want %v", got, want)
+	lease := out.Response[0].Gets
+	if got, want := lease.Capacity, 0.0; got != want {
+		t.Errorf("lease.Capacity = %v, want %v", got, want)
 	}
 
 	// Wait for some time, so the intermediate server will manage to perform
@@ -651,8 +650,8 @@ func TestIntermediateServerUpdate(t *testing.T) {
 	// We expect to receive the full capacity, because intermediate server
 	// should have asked the root server to assign a lease for this requested
 	// resource.
-	lease = out.Response[0].GetGets()
-	if got, want := lease.GetCapacity(), capacity; got != want {
-		t.Errorf("lease.GetCapacity() = %v, want %v", got, want)
+	lease = out.Response[0].Gets
+	if got, want := lease.Capacity, capacity; got != want {
+		t.Errorf("lease.Capacity = %v, want %v", got, want)
 	}
 }

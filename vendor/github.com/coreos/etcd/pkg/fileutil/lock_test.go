@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,44 +35,38 @@ func TestLockAndUnlock(t *testing.T) {
 	}()
 
 	// lock the file
-	l, err := NewLock(f.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Destroy()
-	err = l.Lock()
+	l, err := LockFile(f.Name(), os.O_WRONLY, PrivateFileMode)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// try lock a locked file
-	dupl, err := NewLock(f.Name())
-	if err != nil {
+	if _, err = TryLockFile(f.Name(), os.O_WRONLY, PrivateFileMode); err != ErrLocked {
 		t.Fatal(err)
-	}
-	err = dupl.TryLock()
-	if err != ErrLocked {
-		t.Errorf("err = %v, want %v", err, ErrLocked)
 	}
 
 	// unlock the file
-	err = l.Unlock()
-	if err != nil {
+	if err = l.Close(); err != nil {
 		t.Fatal(err)
 	}
 
 	// try lock the unlocked file
-	err = dupl.TryLock()
+	dupl, err := TryLockFile(f.Name(), os.O_WRONLY, PrivateFileMode)
 	if err != nil {
 		t.Errorf("err = %v, want %v", err, nil)
 	}
-	defer dupl.Destroy()
 
 	// blocking on locked file
 	locked := make(chan struct{}, 1)
 	go func() {
-		l.Lock()
+		bl, blerr := LockFile(f.Name(), os.O_WRONLY, PrivateFileMode)
+		if blerr != nil {
+			t.Fatal(blerr)
+		}
 		locked <- struct{}{}
+		if blerr = bl.Close(); blerr != nil {
+			t.Fatal(blerr)
+		}
 	}()
 
 	select {
@@ -82,8 +76,7 @@ func TestLockAndUnlock(t *testing.T) {
 	}
 
 	// unlock
-	err = dupl.Unlock()
-	if err != nil {
+	if err = dupl.Close(); err != nil {
 		t.Fatal(err)
 	}
 

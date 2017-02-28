@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,16 +15,14 @@
 package etcdserver
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"path"
 
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
+	"github.com/coreos/etcd/pkg/fileutil"
 	"github.com/coreos/etcd/pkg/pbutil"
-	"github.com/coreos/etcd/pkg/testutil"
 	"github.com/coreos/etcd/pkg/types"
-	"github.com/coreos/etcd/raft"
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/snap"
 	"github.com/coreos/etcd/version"
@@ -69,11 +67,7 @@ func (st *storage) SaveSnap(snap raftpb.Snapshot) error {
 	if err != nil {
 		return err
 	}
-	err = st.WAL.ReleaseLockTo(snap.Metadata.Index)
-	if err != nil {
-		return err
-	}
-	return nil
+	return st.WAL.ReleaseLockTo(snap.Metadata.Index)
 }
 
 func readWAL(waldir string, snap walpb.Snapshot) (w *wal.WAL, id, cid types.ID, st raftpb.HardState, ents []raftpb.Entry) {
@@ -136,7 +130,7 @@ func makeMemberDir(dir string) error {
 	case !os.IsNotExist(err):
 		return err
 	}
-	if err := os.MkdirAll(membdir, 0700); err != nil {
+	if err := fileutil.CreateDirAll(membdir); err != nil {
 		return err
 	}
 	names := []string{"snap", "wal"}
@@ -147,39 +141,3 @@ func makeMemberDir(dir string) error {
 	}
 	return nil
 }
-
-type storageRecorder struct {
-	testutil.Recorder
-	dbPath string // must have '/' suffix if set
-}
-
-func newStorageRecorder(db string) *storageRecorder {
-	return &storageRecorder{&testutil.RecorderBuffered{}, db}
-}
-
-func newStorageRecorderStream(db string) *storageRecorder {
-	return &storageRecorder{testutil.NewRecorderStream(), db}
-}
-
-func (p *storageRecorder) Save(st raftpb.HardState, ents []raftpb.Entry) error {
-	p.Record(testutil.Action{Name: "Save"})
-	return nil
-}
-
-func (p *storageRecorder) SaveSnap(st raftpb.Snapshot) error {
-	if !raft.IsEmptySnap(st) {
-		p.Record(testutil.Action{Name: "SaveSnap"})
-	}
-	return nil
-}
-
-func (p *storageRecorder) DBFilePath(id uint64) (string, error) {
-	p.Record(testutil.Action{Name: "DBFilePath"})
-	path := p.dbPath
-	if path != "" {
-		path = path + "/"
-	}
-	return fmt.Sprintf("%s%016x.snap.db", path, id), nil
-}
-
-func (p *storageRecorder) Close() error { return nil }

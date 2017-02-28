@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,31 +11,40 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package v3rpc
 
 import (
-	"github.com/coreos/etcd/Godeps/_workspace/src/google.golang.org/grpc"
-	"github.com/coreos/etcd/Godeps/_workspace/src/google.golang.org/grpc/credentials"
+	"crypto/tls"
+
 	"github.com/coreos/etcd/etcdserver"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
-	"github.com/coreos/etcd/pkg/transport"
+	"github.com/coreos/pkg/capnslog"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/grpclog"
 )
 
-func Server(s *etcdserver.EtcdServer, tls *transport.TLSInfo) (*grpc.Server, error) {
+func init() {
+	grpclog.SetLogger(capnslog.NewPackageLogger("github.com/coreos/etcd/etcdserver", "v3rpc/grpc"))
+}
+
+func Server(s *etcdserver.EtcdServer, tls *tls.Config) *grpc.Server {
 	var opts []grpc.ServerOption
+	opts = append(opts, grpc.CustomCodec(&codec{}))
 	if tls != nil {
-		creds, err := credentials.NewServerTLSFromFile(tls.CertFile, tls.KeyFile)
-		if err != nil {
-			return nil, err
-		}
-		opts = append(opts, grpc.Creds(creds))
+		opts = append(opts, grpc.Creds(credentials.NewTLS(tls)))
 	}
+	opts = append(opts, grpc.UnaryInterceptor(newUnaryInterceptor(s)))
+	opts = append(opts, grpc.StreamInterceptor(newStreamInterceptor(s)))
 
 	grpcServer := grpc.NewServer(opts...)
-	pb.RegisterKVServer(grpcServer, NewKVServer(s))
+	pb.RegisterKVServer(grpcServer, NewQuotaKVServer(s))
 	pb.RegisterWatchServer(grpcServer, NewWatchServer(s))
-	pb.RegisterLeaseServer(grpcServer, NewLeaseServer(s))
+	pb.RegisterLeaseServer(grpcServer, NewQuotaLeaseServer(s))
 	pb.RegisterClusterServer(grpcServer, NewClusterServer(s))
 	pb.RegisterAuthServer(grpcServer, NewAuthServer(s))
-	return grpcServer, nil
+	pb.RegisterMaintenanceServer(grpcServer, NewMaintenanceServer(s))
+
+	return grpcServer
 }

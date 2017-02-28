@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@ package clientv3
 
 import (
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
-	"github.com/coreos/etcd/lease"
 )
 
 type opType int
@@ -26,6 +25,10 @@ const (
 	tRange opType = iota + 1
 	tPut
 	tDeleteRange
+)
+
+var (
+	noPrefixEnd = []byte{0}
 )
 
 // Op represents an Operation that kv can execute.
@@ -38,30 +41,43 @@ type Op struct {
 	limit        int64
 	sort         *SortOption
 	serializable bool
+	keysOnly     bool
+	countOnly    bool
 
 	// for range, watch
 	rev int64
 
+	// progressNotify is for progress updates.
+	progressNotify bool
+
 	// for put
 	val     []byte
-	leaseID lease.LeaseID
+	leaseID LeaseID
 }
 
-func (op Op) toRequestUnion() *pb.RequestUnion {
+func (op Op) toRequestOp() *pb.RequestOp {
 	switch op.t {
 	case tRange:
-		r := &pb.RangeRequest{Key: op.key, RangeEnd: op.end, Limit: op.limit, Revision: op.rev}
+		r := &pb.RangeRequest{
+			Key:          op.key,
+			RangeEnd:     op.end,
+			Limit:        op.limit,
+			Revision:     op.rev,
+			Serializable: op.serializable,
+			KeysOnly:     op.keysOnly,
+			CountOnly:    op.countOnly,
+		}
 		if op.sort != nil {
 			r.SortOrder = pb.RangeRequest_SortOrder(op.sort.Order)
 			r.SortTarget = pb.RangeRequest_SortTarget(op.sort.Target)
 		}
-		return &pb.RequestUnion{Request: &pb.RequestUnion_RequestRange{RequestRange: r}}
+		return &pb.RequestOp{Request: &pb.RequestOp_RequestRange{RequestRange: r}}
 	case tPut:
 		r := &pb.PutRequest{Key: op.key, Value: op.val, Lease: int64(op.leaseID)}
-		return &pb.RequestUnion{Request: &pb.RequestUnion_RequestPut{RequestPut: r}}
+		return &pb.RequestOp{Request: &pb.RequestOp_RequestPut{RequestPut: r}}
 	case tDeleteRange:
 		r := &pb.DeleteRangeRequest{Key: op.key, RangeEnd: op.end}
-		return &pb.RequestUnion{Request: &pb.RequestUnion_RequestDeleteRange{RequestDeleteRange: r}}
+		return &pb.RequestOp{Request: &pb.RequestOp_RequestDeleteRange{RequestDeleteRange: r}}
 	default:
 		panic("Unknown Op")
 	}
@@ -89,8 +105,10 @@ func OpDelete(key string, opts ...OpOption) Op {
 		panic("unexpected revision in delete")
 	case ret.sort != nil:
 		panic("unexpected sort in delete")
-	case ret.serializable != false:
+	case ret.serializable:
 		panic("unexpected serializable in delete")
+	case ret.countOnly:
+		panic("unexpected countOnly in delete")
 	}
 	return ret
 }
@@ -107,8 +125,10 @@ func OpPut(key, val string, opts ...OpOption) Op {
 		panic("unexpected revision in put")
 	case ret.sort != nil:
 		panic("unexpected sort in put")
-	case ret.serializable != false:
-		panic("unexpected serializable in delete")
+	case ret.serializable:
+		panic("unexpected serializable in put")
+	case ret.countOnly:
+		panic("unexpected countOnly in delete")
 	}
 	return ret
 }
@@ -123,8 +143,10 @@ func opWatch(key string, opts ...OpOption) Op {
 		panic("unexpected limit in watch")
 	case ret.sort != nil:
 		panic("unexpected sort in watch")
-	case ret.serializable != false:
+	case ret.serializable:
 		panic("unexpected serializable in watch")
+	case ret.countOnly:
+		panic("unexpected countOnly in delete")
 	}
 	return ret
 }
@@ -139,7 +161,7 @@ func (op *Op) applyOpts(opts []OpOption) {
 type OpOption func(*Op)
 
 // WithLease attaches a lease ID to a key in 'Put' request.
-func WithLease(leaseID lease.LeaseID) OpOption {
+func WithLease(leaseID LeaseID) OpOption {
 	return func(op *Op) { op.leaseID = leaseID }
 }
 
@@ -160,6 +182,12 @@ func WithSort(target SortTarget, order SortOrder) OpOption {
 	}
 }
 
+// GetPrefixRangeEnd gets the range end of the prefix.
+// 'Get(foo, WithPrefix())' is equal to 'Get(foo, WithRange(GetPrefixRangeEnd(foo))'.
+func GetPrefixRangeEnd(prefix string) string {
+	return string(getPrefix([]byte(prefix)))
+}
+
 func getPrefix(key []byte) []byte {
 	end := make([]byte, len(key))
 	copy(end, key)
@@ -172,8 +200,7 @@ func getPrefix(key []byte) []byte {
 	}
 	// next prefix does not exist (e.g., 0xffff);
 	// default to WithFromKey policy
-	end = []byte{0}
-	return end
+	return noPrefixEnd
 }
 
 // WithPrefix enables 'Get', 'Delete', or 'Watch' requests to operate
@@ -193,7 +220,7 @@ func WithRange(endKey string) OpOption {
 }
 
 // WithFromKey specifies the range of 'Get' or 'Delete' requests
-// to be equal or greater than they key in the argument.
+// to be equal or greater than the key in the argument.
 func WithFromKey() OpOption { return WithRange("\x00") }
 
 // WithSerializable makes 'Get' request serializable. By default,
@@ -203,11 +230,22 @@ func WithSerializable() OpOption {
 	return func(op *Op) { op.serializable = true }
 }
 
+// WithKeysOnly makes the 'Get' request return only the keys and the corresponding
+// values will be omitted.
+func WithKeysOnly() OpOption {
+	return func(op *Op) { op.keysOnly = true }
+}
+
+// WithCountOnly makes the 'Get' request return only the count of keys.
+func WithCountOnly() OpOption {
+	return func(op *Op) { op.countOnly = true }
+}
+
 // WithFirstCreate gets the key with the oldest creation revision in the request range.
-func WithFirstCreate() []OpOption { return withTop(SortByCreatedRev, SortAscend) }
+func WithFirstCreate() []OpOption { return withTop(SortByCreateRevision, SortAscend) }
 
 // WithLastCreate gets the key with the latest creation revision in the request range.
-func WithLastCreate() []OpOption { return withTop(SortByCreatedRev, SortDescend) }
+func WithLastCreate() []OpOption { return withTop(SortByCreateRevision, SortDescend) }
 
 // WithFirstKey gets the lexically first key in the request range.
 func WithFirstKey() []OpOption { return withTop(SortByKey, SortAscend) }
@@ -216,12 +254,20 @@ func WithFirstKey() []OpOption { return withTop(SortByKey, SortAscend) }
 func WithLastKey() []OpOption { return withTop(SortByKey, SortDescend) }
 
 // WithFirstRev gets the key with the oldest modification revision in the request range.
-func WithFirstRev() []OpOption { return withTop(SortByModifiedRev, SortAscend) }
+func WithFirstRev() []OpOption { return withTop(SortByModRevision, SortAscend) }
 
 // WithLastRev gets the key with the latest modification revision in the request range.
-func WithLastRev() []OpOption { return withTop(SortByModifiedRev, SortDescend) }
+func WithLastRev() []OpOption { return withTop(SortByModRevision, SortDescend) }
 
 // withTop gets the first key over the get's prefix given a sort order
 func withTop(target SortTarget, order SortOrder) []OpOption {
 	return []OpOption{WithPrefix(), WithSort(target, order), WithLimit(1)}
+}
+
+// WithProgressNotify makes watch server send periodic progress updates.
+// Progress updates have zero events in WatchResponse.
+func WithProgressNotify() OpOption {
+	return func(op *Op) {
+		op.progressNotify = true
+	}
 }

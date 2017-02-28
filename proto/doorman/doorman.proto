@@ -6,13 +6,13 @@
 //
 //      http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software
+// Unless by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-syntax = "proto2";
+syntax = "proto3";
 package doorman;
 
 // NOTE(szopa): All times and time durations are expressed in seconds.
@@ -20,42 +20,42 @@ package doorman;
 // Encapsulates a lease on capacity with a expiry_time in seconds
 // since the epoch.
 message Lease {
-  required int64 expiry_time = 1;
-  required int64 refresh_interval = 2;
-  required double capacity = 3;
+  int64 expiry_time = 1;
+  int64 refresh_interval = 2;
+  double capacity = 3;
 }
 
 // Encapsulates the information we need to send to get capacity for a
 // single resource.
 message ResourceRequest {
-  required string resource_id = 1;
-  required int64 priority = 2;
-  optional Lease has = 3;
-  required double wants = 4;
+  string resource_id = 1;
+  int64 priority = 2;
+  Lease has = 3;
+  double wants = 4;
 }
 
 // The GetCapacityRequest contains the identifier of the client making
 // the request and a list of single resource capacity request protocol
 // buffers.
 message GetCapacityRequest {
-  required string client_id = 1;
+  string client_id = 1;
   repeated ResourceRequest resource = 2;
 }
 
 // Contains the capacity allocated by the server for a single
 // resource.
 message ResourceResponse {
-  required string resource_id = 1;
-  required Lease gets = 2;
-  optional double safe_capacity = 3;
+  string resource_id = 1;
+  Lease gets = 2;
+  double safe_capacity = 3;
 }
 
 // This message type is used when the server wants to convey the
-// address of a master. If the the optional master_address field
+// address of a master. If the the master_address field
 // is not there that means that the server wants to tell us who
 // the master is, but it doesn't know.
 message Mastership {
-  optional string master_address = 1;
+  string master_address = 1;
 }
 
 // The response to a GetCapacity request is a list of protocol buffers
@@ -67,31 +67,31 @@ message Mastership {
 // be empty.
 message GetCapacityResponse {
   repeated ResourceResponse response = 1;
-  optional Mastership mastership = 2;
+  Mastership mastership = 2;
 }
 
 message PriorityBandAggregate {
-  required int64 priority = 1;
-  required int64 num_clients = 2;
-  required double wants = 3;
+  int64 priority = 1;
+  int64 num_clients = 2;
+  double wants = 3;
 }
 
 message ServerCapacityResourceRequest {
-  required string resource_id = 1;
-  optional Lease has = 2;
+  string resource_id = 1;
+  Lease has = 2;
   repeated PriorityBandAggregate wants = 3;
 }
 
 message GetServerCapacityRequest {
-  required string server_id = 1;
+  string server_id = 1;
   repeated ServerCapacityResourceRequest resource = 2;
 }
 
 message ServerCapacityResourceResponse {
-  required string resource_id = 1;
-  required Lease gets = 2;
-  optional Algorithm algorithm = 3;
-  optional double safe_capacity = 4;
+  string resource_id = 1;
+  Lease gets = 2;
+  Algorithm algorithm = 3;
+  double safe_capacity = 4;
 }
 
 // The response to a GetServerCapacity request is a list of protocol buffers
@@ -103,7 +103,7 @@ message ServerCapacityResourceResponse {
 // be empty.
 message GetServerCapacityResponse {
   repeated ServerCapacityResourceResponse response = 1;
-  optional Mastership mastership = 2;
+  Mastership mastership = 2;
 }
 
 // The ReleaseCapacity RPC instructs the server to release all leases
@@ -111,17 +111,17 @@ message GetServerCapacityResponse {
 // to expire as part of this RPC, so the client should not use the resource
 // anymore.
 message ReleaseCapacityRequest {
-  required string client_id = 1;
+  string client_id = 1;
   repeated string resource_id = 2;
 }
 
 // A ReleaseCapacity RPC can only fail if the server we are talking to
 // is not the master. In that case the mastership field indicates who
 // the master is (if we know, if we don't know the mastership field will
-// be there but the optional master_addres field inside mastership will
+// be there but the master_addres field inside mastership will
 // not be there).
 message ReleaseCapacityResponse {
-  optional Mastership mastership = 1;
+  Mastership mastership = 1;
 }
 
 //
@@ -131,8 +131,8 @@ message ReleaseCapacityResponse {
 // NamedParameter encapsulates a name/value pair which is used to
 // configure an Algorithm (see below).
 message NamedParameter {
-  required string name = 1;
-  optional string value = 2;
+  string name = 1;
+  string value = 2;
 }
 
 message Algorithm {
@@ -143,14 +143,14 @@ message Algorithm {
     FAIR_SHARE = 3;
   }
 
-  required Kind kind = 1;
+  Kind kind = 1;
 
   // How long should the lease be, in seconds.
-  required int64 lease_length = 2;
+  int64 lease_length = 2;
 
   // How many seconds should the client wait until refreshing its
   // lease.
-  required int64 refresh_interval = 3;
+  int64 refresh_interval = 3;
 
   repeated NamedParameter parameters = 4;
 
@@ -162,20 +162,20 @@ message Algorithm {
   // mode duration (longer than the lease length), but then you
   // are a muppet (or you do not trust the clients, in which case
   // you need to fix the client implementation).
-  optional int64 learning_mode_duration = 5;
+  int64 learning_mode_duration = 5;
 }
 
 // ResourceTemplate is used to instantiate the actual configuration
 // for a resource based on a match with the identifier_glob glob.
 message ResourceTemplate {
   // Glob used to match actual resources.
-  required string identifier_glob = 1;
+  string identifier_glob = 1;
 
   // Capacity in service units
-  required double capacity = 2;
+  double capacity = 2;
 
   // Algorithm used to divide capacity between clients.
-  required Algorithm algorithm = 3;
+  Algorithm algorithm = 3;
 
   // Capacity to use in "safe" mode.
   // You can set this to a number and then the client will use that number
@@ -183,10 +183,10 @@ message ResourceTemplate {
   // If this field is absent the system returns a dynamic safe capacity in
   // the response, which is the available capacity divided by the number of
   // clients that the server knows about.
-  optional double safe_capacity = 4;
+  double safe_capacity = 4;
 
   // Description of the resource.
-  optional string description = 5;
+  string description = 5;
 }
 
 // The resource configuration consists of a list of templates.
@@ -203,8 +203,8 @@ message DiscoveryRequest {
 
 // The response containing the master's address.
 message DiscoveryResponse {
-  required Mastership mastership = 1;
-  required bool is_master = 2;
+  Mastership mastership = 1;
+  bool is_master = 2;
 }
 
 service Capacity {

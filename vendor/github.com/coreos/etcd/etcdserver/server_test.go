@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,14 +21,18 @@ import (
 	"os"
 	"path"
 	"reflect"
-	"strconv"
 	"testing"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
+	"github.com/coreos/etcd/etcdserver/membership"
 	"github.com/coreos/etcd/lease"
+	"github.com/coreos/etcd/mvcc"
+	"github.com/coreos/etcd/mvcc/backend"
 	"github.com/coreos/etcd/pkg/idutil"
+	"github.com/coreos/etcd/pkg/mock/mockstorage"
+	"github.com/coreos/etcd/pkg/mock/mockstore"
+	"github.com/coreos/etcd/pkg/mock/mockwait"
 	"github.com/coreos/etcd/pkg/pbutil"
 	"github.com/coreos/etcd/pkg/testutil"
 	"github.com/coreos/etcd/pkg/types"
@@ -36,9 +40,8 @@ import (
 	"github.com/coreos/etcd/raft"
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/rafthttp"
-	dstorage "github.com/coreos/etcd/storage"
-	"github.com/coreos/etcd/storage/backend"
 	"github.com/coreos/etcd/store"
+	"golang.org/x/net/context"
 )
 
 // TestDoLocalAction tests requests which do not need to go through raft to be applied,
@@ -81,7 +84,7 @@ func TestDoLocalAction(t *testing.T) {
 		},
 	}
 	for i, tt := range tests {
-		st := store.NewRecorder()
+		st := mockstore.NewRecorder()
 		srv := &EtcdServer{
 			store:    st,
 			reqIDGen: idutil.NewGenerator(0, time.Time{}),
@@ -134,7 +137,7 @@ func TestDoBadLocalAction(t *testing.T) {
 		},
 	}
 	for i, tt := range tests {
-		st := store.NewErrRecorder(storeErr)
+		st := mockstore.NewErrRecorder(storeErr)
 		srv := &EtcdServer{
 			store:    st,
 			reqIDGen: idutil.NewGenerator(0, time.Time{}),
@@ -163,19 +166,20 @@ func TestApplyRepeat(t *testing.T) {
 	cl := newTestCluster(nil)
 	st := store.New()
 	cl.SetStore(store.New())
-	cl.AddMember(&Member{ID: 1234})
+	cl.AddMember(&membership.Member{ID: 1234})
 	s := &EtcdServer{
 		r: raftNode{
 			Node:        n,
 			raftStorage: raft.NewMemoryStorage(),
-			storage:     newStorageRecorder(""),
+			storage:     mockstorage.NewStorageRecorder(""),
 			transport:   rafthttp.NewNopTransporter(),
 		},
-		cfg:      &ServerConfig{},
+		Cfg:      &ServerConfig{},
 		store:    st,
 		cluster:  cl,
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
 	}
+	s.applyV2 = &applierV2store{store: s.store, cluster: s.cluster}
 	s.start()
 	req := &pb.Request{Method: "QGET", ID: uint64(1)}
 	ents := []raftpb.Entry{{Index: 1, Data: pbutil.MustMarshal(req)}}
@@ -439,9 +443,10 @@ func TestApplyRequest(t *testing.T) {
 	}
 
 	for i, tt := range tests {
-		st := store.NewRecorder()
+		st := mockstore.NewRecorder()
 		srv := &EtcdServer{store: st}
-		resp := srv.applyRequest(tt.req)
+		srv.applyV2 = &applierV2store{store: srv.store, cluster: srv.cluster}
+		resp := srv.applyV2Request(&tt.req)
 
 		if !reflect.DeepEqual(resp, tt.wresp) {
 			t.Errorf("#%d: resp = %+v, want %+v", i, resp, tt.wresp)
@@ -454,29 +459,31 @@ func TestApplyRequest(t *testing.T) {
 }
 
 func TestApplyRequestOnAdminMemberAttributes(t *testing.T) {
-	cl := newTestCluster([]*Member{{ID: 1}})
+	cl := newTestCluster([]*membership.Member{{ID: 1}})
 	srv := &EtcdServer{
-		store:   store.NewRecorder(),
+		store:   mockstore.NewRecorder(),
 		cluster: cl,
 	}
+	srv.applyV2 = &applierV2store{store: srv.store, cluster: srv.cluster}
+
 	req := pb.Request{
 		Method: "PUT",
 		ID:     1,
-		Path:   path.Join(storeMembersPrefix, strconv.FormatUint(1, 16), attributesSuffix),
+		Path:   membership.MemberAttributesStorePath(1),
 		Val:    `{"Name":"abc","ClientURLs":["http://127.0.0.1:2379"]}`,
 	}
-	srv.applyRequest(req)
-	w := Attributes{Name: "abc", ClientURLs: []string{"http://127.0.0.1:2379"}}
+	srv.applyV2Request(&req)
+	w := membership.Attributes{Name: "abc", ClientURLs: []string{"http://127.0.0.1:2379"}}
 	if g := cl.Member(1).Attributes; !reflect.DeepEqual(g, w) {
 		t.Errorf("attributes = %v, want %v", g, w)
 	}
 }
 
 func TestApplyConfChangeError(t *testing.T) {
-	cl := newCluster("")
+	cl := membership.NewCluster("")
 	cl.SetStore(store.New())
 	for i := 1; i <= 4; i++ {
-		cl.AddMember(&Member{ID: types.ID(i)})
+		cl.AddMember(&membership.Member{ID: types.ID(i)})
 	}
 	cl.RemoveMember(4)
 
@@ -489,28 +496,28 @@ func TestApplyConfChangeError(t *testing.T) {
 				Type:   raftpb.ConfChangeAddNode,
 				NodeID: 4,
 			},
-			ErrIDRemoved,
+			membership.ErrIDRemoved,
 		},
 		{
 			raftpb.ConfChange{
 				Type:   raftpb.ConfChangeUpdateNode,
 				NodeID: 4,
 			},
-			ErrIDRemoved,
+			membership.ErrIDRemoved,
 		},
 		{
 			raftpb.ConfChange{
 				Type:   raftpb.ConfChangeAddNode,
 				NodeID: 1,
 			},
-			ErrIDExists,
+			membership.ErrIDExists,
 		},
 		{
 			raftpb.ConfChange{
 				Type:   raftpb.ConfChangeRemoveNode,
 				NodeID: 5,
 			},
-			ErrIDNotFound,
+			membership.ErrIDNotFound,
 		},
 	}
 	for i, tt := range tests {
@@ -518,7 +525,7 @@ func TestApplyConfChangeError(t *testing.T) {
 		srv := &EtcdServer{
 			r:       raftNode{Node: n},
 			cluster: cl,
-			cfg:     &ServerConfig{},
+			Cfg:     &ServerConfig{},
 		}
 		_, err := srv.applyConfChange(tt.cc, nil)
 		if err != tt.werr {
@@ -538,10 +545,10 @@ func TestApplyConfChangeError(t *testing.T) {
 }
 
 func TestApplyConfChangeShouldStop(t *testing.T) {
-	cl := newCluster("")
+	cl := membership.NewCluster("")
 	cl.SetStore(store.New())
 	for i := 1; i <= 3; i++ {
-		cl.AddMember(&Member{ID: types.ID(i)})
+		cl.AddMember(&membership.Member{ID: types.ID(i)})
 	}
 	srv := &EtcdServer{
 		id: 1,
@@ -560,7 +567,7 @@ func TestApplyConfChangeShouldStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error %v", err)
 	}
-	if shouldStop != false {
+	if shouldStop {
 		t.Errorf("shouldStop = %t, want %t", shouldStop, false)
 	}
 
@@ -570,7 +577,7 @@ func TestApplyConfChangeShouldStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error %v", err)
 	}
-	if shouldStop != true {
+	if !shouldStop {
 		t.Errorf("shouldStop = %t, want %t", shouldStop, true)
 	}
 }
@@ -578,10 +585,10 @@ func TestApplyConfChangeShouldStop(t *testing.T) {
 // TestApplyMultiConfChangeShouldStop ensures that apply will return shouldStop
 // if the local member is removed along with other conf updates.
 func TestApplyMultiConfChangeShouldStop(t *testing.T) {
-	cl := newCluster("")
+	cl := membership.NewCluster("")
 	cl.SetStore(store.New())
 	for i := 1; i <= 5; i++ {
-		cl.AddMember(&Member{ID: types.ID(i)})
+		cl.AddMember(&membership.Member{ID: types.ID(i)})
 	}
 	srv := &EtcdServer{
 		id: 2,
@@ -607,7 +614,7 @@ func TestApplyMultiConfChangeShouldStop(t *testing.T) {
 	}
 
 	_, shouldStop := srv.apply(ents, &raftpb.ConfState{})
-	if shouldStop == false {
+	if !shouldStop {
 		t.Errorf("shouldStop = %t, want %t", shouldStop, true)
 	}
 }
@@ -620,18 +627,19 @@ func TestDoProposal(t *testing.T) {
 		{Method: "GET", ID: 1, Quorum: true},
 	}
 	for i, tt := range tests {
-		st := store.NewRecorder()
+		st := mockstore.NewRecorder()
 		srv := &EtcdServer{
-			cfg: &ServerConfig{TickMs: 1},
+			Cfg: &ServerConfig{TickMs: 1},
 			r: raftNode{
 				Node:        newNodeCommitter(),
-				storage:     newStorageRecorder(""),
+				storage:     mockstorage.NewStorageRecorder(""),
 				raftStorage: raft.NewMemoryStorage(),
 				transport:   rafthttp.NewNopTransporter(),
 			},
 			store:    st,
 			reqIDGen: idutil.NewGenerator(0, time.Time{}),
 		}
+		srv.applyV2 = &applierV2store{store: srv.store, cluster: srv.cluster}
 		srv.start()
 		resp, err := srv.Do(context.Background(), tt)
 		srv.Stop()
@@ -651,13 +659,15 @@ func TestDoProposal(t *testing.T) {
 }
 
 func TestDoProposalCancelled(t *testing.T) {
-	wait := wait.NewRecorder()
+	wt := mockwait.NewRecorder()
 	srv := &EtcdServer{
-		cfg:      &ServerConfig{TickMs: 1},
+		Cfg:      &ServerConfig{TickMs: 1},
 		r:        raftNode{Node: newNodeNop()},
-		w:        wait,
+		w:        wt,
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
 	}
+	srv.applyV2 = &applierV2store{store: srv.store, cluster: srv.cluster}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := srv.Do(ctx, pb.Request{Method: "PUT"})
@@ -666,18 +676,20 @@ func TestDoProposalCancelled(t *testing.T) {
 		t.Fatalf("err = %v, want %v", err, ErrCanceled)
 	}
 	w := []testutil.Action{{Name: "Register"}, {Name: "Trigger"}}
-	if !reflect.DeepEqual(wait.Action(), w) {
-		t.Errorf("wait.action = %+v, want %+v", wait.Action(), w)
+	if !reflect.DeepEqual(wt.Action(), w) {
+		t.Errorf("wt.action = %+v, want %+v", wt.Action(), w)
 	}
 }
 
 func TestDoProposalTimeout(t *testing.T) {
 	srv := &EtcdServer{
-		cfg:      &ServerConfig{TickMs: 1},
+		Cfg:      &ServerConfig{TickMs: 1},
 		r:        raftNode{Node: newNodeNop()},
-		w:        wait.NewNop(),
+		w:        mockwait.NewNop(),
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
 	}
+	srv.applyV2 = &applierV2store{store: srv.store, cluster: srv.cluster}
+
 	ctx, _ := context.WithTimeout(context.Background(), 0)
 	_, err := srv.Do(ctx, pb.Request{Method: "PUT"})
 	if err != ErrTimeout {
@@ -687,11 +699,13 @@ func TestDoProposalTimeout(t *testing.T) {
 
 func TestDoProposalStopped(t *testing.T) {
 	srv := &EtcdServer{
-		cfg:      &ServerConfig{TickMs: 1},
+		Cfg:      &ServerConfig{TickMs: 1},
 		r:        raftNode{Node: newNodeNop()},
-		w:        wait.NewNop(),
+		w:        mockwait.NewNop(),
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
 	}
+	srv.applyV2 = &applierV2store{store: srv.store, cluster: srv.cluster}
+
 	srv.done = make(chan struct{})
 	close(srv.done)
 	_, err := srv.Do(context.Background(), pb.Request{Method: "PUT", ID: 1})
@@ -707,6 +721,8 @@ func TestSync(t *testing.T) {
 		r:        raftNode{Node: n},
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
 	}
+	srv.applyV2 = &applierV2store{store: srv.store, cluster: srv.cluster}
+
 	// check that sync is non-blocking
 	done := make(chan struct{})
 	go func() {
@@ -745,6 +761,8 @@ func TestSyncTimeout(t *testing.T) {
 		r:        raftNode{Node: n},
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
 	}
+	srv.applyV2 = &applierV2store{store: srv.store, cluster: srv.cluster}
+
 	// check that sync is non-blocking
 	done := make(chan struct{})
 	go func() {
@@ -771,14 +789,14 @@ func TestSyncTrigger(t *testing.T) {
 	n := newReadyNode()
 	st := make(chan time.Time, 1)
 	srv := &EtcdServer{
-		cfg: &ServerConfig{TickMs: 1},
+		Cfg: &ServerConfig{TickMs: 1},
 		r: raftNode{
 			Node:        n,
 			raftStorage: raft.NewMemoryStorage(),
 			transport:   rafthttp.NewNopTransporter(),
-			storage:     newStorageRecorder(""),
+			storage:     mockstorage.NewStorageRecorder(""),
 		},
-		store:      store.NewNop(),
+		store:      mockstore.NewNop(),
 		SyncTicker: st,
 		reqIDGen:   idutil.NewGenerator(0, time.Time{}),
 	}
@@ -819,12 +837,17 @@ func TestSyncTrigger(t *testing.T) {
 
 // snapshot should snapshot the store and cut the persistent
 func TestSnapshot(t *testing.T) {
+	be, tmpPath := backend.NewDefaultTmpBackend()
+	defer func() {
+		os.RemoveAll(tmpPath)
+	}()
+
 	s := raft.NewMemoryStorage()
 	s.Append([]raftpb.Entry{{Index: 1}})
-	st := store.NewRecorder()
-	p := newStorageRecorder("")
+	st := mockstore.NewRecorder()
+	p := mockstorage.NewStorageRecorderStream("")
 	srv := &EtcdServer{
-		cfg: &ServerConfig{},
+		Cfg: &ServerConfig{},
 		r: raftNode{
 			Node:        newNodeNop(),
 			raftStorage: s,
@@ -832,6 +855,9 @@ func TestSnapshot(t *testing.T) {
 		},
 		store: st,
 	}
+	srv.kv = mvcc.New(be, &lease.FakeLessor{}, &srv.consistIndex)
+	srv.be = be
+
 	srv.snapshot(1, raftpb.ConfState{Nodes: []uint64{1}})
 	gaction, _ := st.Wait(2)
 	if len(gaction) != 2 {
@@ -843,7 +869,7 @@ func TestSnapshot(t *testing.T) {
 	if !reflect.DeepEqual(gaction[1], testutil.Action{Name: "SaveNoCopy"}) {
 		t.Errorf("action = %s, want SaveNoCopy", gaction[1])
 	}
-	gaction = p.Action()
+	gaction, _ = p.Wait(1)
 	if len(gaction) != 1 {
 		t.Fatalf("len(action) = %d, want 1", len(gaction))
 	}
@@ -854,11 +880,16 @@ func TestSnapshot(t *testing.T) {
 
 // Applied > SnapCount should trigger a SaveSnap event
 func TestTriggerSnap(t *testing.T) {
+	be, tmpPath := backend.NewDefaultTmpBackend()
+	defer func() {
+		os.RemoveAll(tmpPath)
+	}()
+
 	snapc := 10
-	st := store.NewRecorder()
-	p := newStorageRecorderStream("")
+	st := mockstore.NewRecorder()
+	p := mockstorage.NewStorageRecorderStream("")
 	srv := &EtcdServer{
-		cfg:       &ServerConfig{TickMs: 1},
+		Cfg:       &ServerConfig{TickMs: 1},
 		snapCount: uint64(snapc),
 		r: raftNode{
 			Node:        newNodeCommitter(),
@@ -869,6 +900,11 @@ func TestTriggerSnap(t *testing.T) {
 		store:    st,
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
 	}
+	srv.applyV2 = &applierV2store{store: srv.store, cluster: srv.cluster}
+
+	srv.kv = mvcc.New(be, &lease.FakeLessor{}, &srv.consistIndex)
+	srv.be = be
+
 	srv.start()
 
 	donec := make(chan struct{})
@@ -903,8 +939,9 @@ func TestConcurrentApplyAndSnapshotV3(t *testing.T) {
 		maxInFlightMsgSnap = 16
 	)
 	n := newNopReadyNode()
-	cl := newCluster("abc")
-	cl.SetStore(store.New())
+	st := store.New()
+	cl := membership.NewCluster("abc")
+	cl.SetStore(st)
 
 	testdir, err := ioutil.TempDir(os.TempDir(), "testsnapdir")
 	if err != nil {
@@ -918,26 +955,26 @@ func TestConcurrentApplyAndSnapshotV3(t *testing.T) {
 	rs := raft.NewMemoryStorage()
 	tr, snapDoneC := rafthttp.NewSnapTransporter(testdir)
 	s := &EtcdServer{
-		cfg: &ServerConfig{
-			V3demo:  true,
+		Cfg: &ServerConfig{
 			DataDir: testdir,
 		},
 		r: raftNode{
 			Node:        n,
 			transport:   tr,
-			storage:     newStorageRecorder(testdir),
+			storage:     mockstorage.NewStorageRecorder(testdir),
 			raftStorage: rs,
 		},
-		store:    cl.store,
+		store:    st,
 		cluster:  cl,
 		msgSnapC: make(chan raftpb.Message, maxInFlightMsgSnap),
 	}
+	s.applyV2 = &applierV2store{store: s.store, cluster: s.cluster}
 
 	be, tmpPath := backend.NewDefaultTmpBackend()
 	defer func() {
 		os.RemoveAll(tmpPath)
 	}()
-	s.kv = dstorage.New(be, &lease.FakeLessor{}, &s.consistIndex)
+	s.kv = mvcc.New(be, &lease.FakeLessor{}, &s.consistIndex)
 	s.be = be
 
 	s.start()
@@ -992,89 +1029,6 @@ func TestConcurrentApplyAndSnapshotV3(t *testing.T) {
 	}
 }
 
-// TestRecvSnapshot tests when it receives a snapshot from raft leader,
-// it should trigger storage.SaveSnap and also store.Recover.
-func TestRecvSnapshot(t *testing.T) {
-	n := newNopReadyNode()
-	st := store.NewRecorder()
-	p := newStorageRecorder("")
-	cl := newCluster("abc")
-	cl.SetStore(store.New())
-	s := &EtcdServer{
-		cfg: &ServerConfig{},
-		r: raftNode{
-			Node:        n,
-			transport:   rafthttp.NewNopTransporter(),
-			storage:     p,
-			raftStorage: raft.NewMemoryStorage(),
-		},
-		store:   st,
-		cluster: cl,
-	}
-
-	s.start()
-	n.readyc <- raft.Ready{Snapshot: raftpb.Snapshot{Metadata: raftpb.SnapshotMetadata{Index: 1}}}
-
-	// wait for actions happened on the storage
-	for len(p.Action()) == 0 {
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	s.Stop()
-
-	wactions := []testutil.Action{{Name: "Recovery"}}
-	if g := st.Action(); !reflect.DeepEqual(g, wactions) {
-		t.Errorf("store action = %v, want %v", g, wactions)
-	}
-	wactions = []testutil.Action{{Name: "SaveSnap"}, {Name: "Save"}}
-	if g := p.Action(); !reflect.DeepEqual(g, wactions) {
-		t.Errorf("storage action = %v, want %v", g, wactions)
-	}
-}
-
-// TestApplySnapshotAndCommittedEntries tests that server applies snapshot
-// first and then committed entries.
-func TestApplySnapshotAndCommittedEntries(t *testing.T) {
-	n := newNopReadyNode()
-	st := store.NewRecorderStream()
-	cl := newCluster("abc")
-	cl.SetStore(store.New())
-	storage := raft.NewMemoryStorage()
-	s := &EtcdServer{
-		cfg: &ServerConfig{},
-		r: raftNode{
-			Node:        n,
-			storage:     newStorageRecorder(""),
-			raftStorage: storage,
-			transport:   rafthttp.NewNopTransporter(),
-		},
-		store:   st,
-		cluster: cl,
-	}
-
-	s.start()
-	req := &pb.Request{Method: "QGET"}
-	n.readyc <- raft.Ready{
-		Snapshot: raftpb.Snapshot{Metadata: raftpb.SnapshotMetadata{Index: 1}},
-		CommittedEntries: []raftpb.Entry{
-			{Index: 2, Data: pbutil.MustMarshal(req)},
-		},
-	}
-	// make goroutines move forward to receive snapshot
-	actions, _ := st.Wait(2)
-	s.Stop()
-
-	if len(actions) != 2 {
-		t.Fatalf("len(action) = %d, want 2", len(actions))
-	}
-	if actions[0].Name != "Recovery" {
-		t.Errorf("actions[0] = %s, want %s", actions[0].Name, "Recovery")
-	}
-	if actions[1].Name != "Get" {
-		t.Errorf("actions[1] = %s, want %s", actions[1].Name, "Get")
-	}
-}
-
 // TestAddMember tests AddMember can propose and perform node addition.
 func TestAddMember(t *testing.T) {
 	n := newNodeConfChangeCommitterRecorder()
@@ -1088,16 +1042,16 @@ func TestAddMember(t *testing.T) {
 		r: raftNode{
 			Node:        n,
 			raftStorage: raft.NewMemoryStorage(),
-			storage:     newStorageRecorder(""),
+			storage:     mockstorage.NewStorageRecorder(""),
 			transport:   rafthttp.NewNopTransporter(),
 		},
-		cfg:      &ServerConfig{},
+		Cfg:      &ServerConfig{},
 		store:    st,
 		cluster:  cl,
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
 	}
 	s.start()
-	m := Member{ID: 1234, RaftAttributes: RaftAttributes{PeerURLs: []string{"foo"}}}
+	m := membership.Member{ID: 1234, RaftAttributes: membership.RaftAttributes{PeerURLs: []string{"foo"}}}
 	err := s.AddMember(context.TODO(), m)
 	gaction := n.Action()
 	s.Stop()
@@ -1123,15 +1077,15 @@ func TestRemoveMember(t *testing.T) {
 	cl := newTestCluster(nil)
 	st := store.New()
 	cl.SetStore(store.New())
-	cl.AddMember(&Member{ID: 1234})
+	cl.AddMember(&membership.Member{ID: 1234})
 	s := &EtcdServer{
 		r: raftNode{
 			Node:        n,
 			raftStorage: raft.NewMemoryStorage(),
-			storage:     newStorageRecorder(""),
+			storage:     mockstorage.NewStorageRecorder(""),
 			transport:   rafthttp.NewNopTransporter(),
 		},
-		cfg:      &ServerConfig{},
+		Cfg:      &ServerConfig{},
 		store:    st,
 		cluster:  cl,
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
@@ -1162,12 +1116,12 @@ func TestUpdateMember(t *testing.T) {
 	cl := newTestCluster(nil)
 	st := store.New()
 	cl.SetStore(st)
-	cl.AddMember(&Member{ID: 1234})
+	cl.AddMember(&membership.Member{ID: 1234})
 	s := &EtcdServer{
 		r: raftNode{
 			Node:        n,
 			raftStorage: raft.NewMemoryStorage(),
-			storage:     newStorageRecorder(""),
+			storage:     mockstorage.NewStorageRecorder(""),
 			transport:   rafthttp.NewNopTransporter(),
 		},
 		store:    st,
@@ -1175,7 +1129,7 @@ func TestUpdateMember(t *testing.T) {
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
 	}
 	s.start()
-	wm := Member{ID: 1234, RaftAttributes: RaftAttributes{PeerURLs: []string{"http://127.0.0.1:1"}}}
+	wm := membership.Member{ID: 1234, RaftAttributes: membership.RaftAttributes{PeerURLs: []string{"http://127.0.0.1:1"}}}
 	err := s.UpdateMember(context.TODO(), wm)
 	gaction := n.Action()
 	s.Stop()
@@ -1201,11 +1155,12 @@ func TestPublish(t *testing.T) {
 	ch <- Response{}
 	w := wait.NewWithResponse(ch)
 	srv := &EtcdServer{
-		cfg:        &ServerConfig{TickMs: 1},
+		readych:    make(chan struct{}),
+		Cfg:        &ServerConfig{TickMs: 1},
 		id:         1,
 		r:          raftNode{Node: n},
-		attributes: Attributes{Name: "node1", ClientURLs: []string{"http://a", "http://b"}},
-		cluster:    &cluster{},
+		attributes: membership.Attributes{Name: "node1", ClientURLs: []string{"http://a", "http://b"}},
+		cluster:    &membership.RaftCluster{},
 		w:          w,
 		reqIDGen:   idutil.NewGenerator(0, time.Time{}),
 	}
@@ -1226,11 +1181,11 @@ func TestPublish(t *testing.T) {
 	if r.Method != "PUT" {
 		t.Errorf("method = %s, want PUT", r.Method)
 	}
-	wm := Member{ID: 1, Attributes: Attributes{Name: "node1", ClientURLs: []string{"http://a", "http://b"}}}
-	if wpath := path.Join(memberStoreKey(wm.ID), attributesSuffix); r.Path != wpath {
+	wm := membership.Member{ID: 1, Attributes: membership.Attributes{Name: "node1", ClientURLs: []string{"http://a", "http://b"}}}
+	if wpath := membership.MemberAttributesStorePath(wm.ID); r.Path != wpath {
 		t.Errorf("path = %s, want %s", r.Path, wpath)
 	}
-	var gattr Attributes
+	var gattr membership.Attributes
 	if err := json.Unmarshal([]byte(r.Val), &gattr); err != nil {
 		t.Fatalf("unmarshal val error: %v", err)
 	}
@@ -1242,13 +1197,13 @@ func TestPublish(t *testing.T) {
 // TestPublishStopped tests that publish will be stopped if server is stopped.
 func TestPublishStopped(t *testing.T) {
 	srv := &EtcdServer{
-		cfg: &ServerConfig{TickMs: 1},
+		Cfg: &ServerConfig{TickMs: 1},
 		r: raftNode{
 			Node:      newNodeNop(),
 			transport: rafthttp.NewNopTransporter(),
 		},
-		cluster:  &cluster{},
-		w:        wait.NewNop(),
+		cluster:  &membership.RaftCluster{},
+		w:        mockwait.NewNop(),
 		done:     make(chan struct{}),
 		stop:     make(chan struct{}),
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
@@ -1261,9 +1216,9 @@ func TestPublishStopped(t *testing.T) {
 func TestPublishRetry(t *testing.T) {
 	n := newNodeRecorder()
 	srv := &EtcdServer{
-		cfg:      &ServerConfig{TickMs: 1},
+		Cfg:      &ServerConfig{TickMs: 1},
 		r:        raftNode{Node: n},
-		w:        wait.NewNop(),
+		w:        mockwait.NewNop(),
 		done:     make(chan struct{}),
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
 	}
@@ -1286,10 +1241,10 @@ func TestUpdateVersion(t *testing.T) {
 	w := wait.NewWithResponse(ch)
 	srv := &EtcdServer{
 		id:         1,
-		cfg:        &ServerConfig{TickMs: 1},
+		Cfg:        &ServerConfig{TickMs: 1},
 		r:          raftNode{Node: n},
-		attributes: Attributes{Name: "node1", ClientURLs: []string{"http://node1.com"}},
-		cluster:    &cluster{},
+		attributes: membership.Attributes{Name: "node1", ClientURLs: []string{"http://node1.com"}},
+		cluster:    &membership.RaftCluster{},
 		w:          w,
 		reqIDGen:   idutil.NewGenerator(0, time.Time{}),
 	}
@@ -1344,39 +1299,36 @@ func TestStopNotify(t *testing.T) {
 
 func TestGetOtherPeerURLs(t *testing.T) {
 	tests := []struct {
-		membs []*Member
-		self  string
+		membs []*membership.Member
 		wurls []string
 	}{
 		{
-			[]*Member{
-				newTestMember(1, []string{"http://10.0.0.1"}, "a", nil),
+			[]*membership.Member{
+				membership.NewMember("1", types.MustNewURLs([]string{"http://10.0.0.1:1"}), "a", nil),
 			},
-			"a",
 			[]string{},
 		},
 		{
-			[]*Member{
-				newTestMember(1, []string{"http://10.0.0.1"}, "a", nil),
-				newTestMember(2, []string{"http://10.0.0.2"}, "b", nil),
-				newTestMember(3, []string{"http://10.0.0.3"}, "c", nil),
+			[]*membership.Member{
+				membership.NewMember("1", types.MustNewURLs([]string{"http://10.0.0.1:1"}), "a", nil),
+				membership.NewMember("2", types.MustNewURLs([]string{"http://10.0.0.2:2"}), "a", nil),
+				membership.NewMember("3", types.MustNewURLs([]string{"http://10.0.0.3:3"}), "a", nil),
 			},
-			"a",
-			[]string{"http://10.0.0.2", "http://10.0.0.3"},
+			[]string{"http://10.0.0.2:2", "http://10.0.0.3:3"},
 		},
 		{
-			[]*Member{
-				newTestMember(1, []string{"http://10.0.0.1"}, "a", nil),
-				newTestMember(3, []string{"http://10.0.0.3"}, "c", nil),
-				newTestMember(2, []string{"http://10.0.0.2"}, "b", nil),
+			[]*membership.Member{
+				membership.NewMember("1", types.MustNewURLs([]string{"http://10.0.0.1:1"}), "a", nil),
+				membership.NewMember("3", types.MustNewURLs([]string{"http://10.0.0.3:3"}), "a", nil),
+				membership.NewMember("2", types.MustNewURLs([]string{"http://10.0.0.2:2"}), "a", nil),
 			},
-			"a",
-			[]string{"http://10.0.0.2", "http://10.0.0.3"},
+			[]string{"http://10.0.0.2:2", "http://10.0.0.3:3"},
 		},
 	}
 	for i, tt := range tests {
-		cl := newClusterFromMembers("", types.ID(0), tt.membs)
-		urls := getRemotePeerURLs(cl, tt.self)
+		cl := membership.NewClusterFromMembers("", types.ID(0), tt.membs)
+		self := "1"
+		urls := getRemotePeerURLs(cl, self)
 		if !reflect.DeepEqual(urls, tt.wurls) {
 			t.Errorf("#%d: urls = %+v, want %+v", i, urls, tt.wurls)
 		}
@@ -1504,4 +1456,12 @@ func (n *nodeCommitter) Propose(ctx context.Context, data []byte) error {
 		CommittedEntries: ents,
 	}
 	return nil
+}
+
+func newTestCluster(membs []*membership.Member) *membership.RaftCluster {
+	c := membership.NewCluster("")
+	for _, m := range membs {
+		c.AddMember(m)
+	}
+	return c
 }

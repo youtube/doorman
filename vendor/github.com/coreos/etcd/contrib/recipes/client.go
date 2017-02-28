@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,9 @@ package recipe
 import (
 	"errors"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	v3 "github.com/coreos/etcd/clientv3"
-	spb "github.com/coreos/etcd/storage/storagepb"
+	spb "github.com/coreos/etcd/mvcc/mvccpb"
+	"golang.org/x/net/context"
 )
 
 var (
@@ -31,12 +31,12 @@ var (
 
 // deleteRevKey deletes a key by revision, returning false if key is missing
 func deleteRevKey(kv v3.KV, key string, rev int64) (bool, error) {
-	cmp := v3.Compare(v3.ModifiedRevision(key), "=", rev)
+	cmp := v3.Compare(v3.ModRevision(key), "=", rev)
 	req := v3.OpDelete(key)
 	txnresp, err := kv.Txn(context.TODO()).If(cmp).Then(req).Commit()
 	if err != nil {
 		return false, err
-	} else if txnresp.Succeeded == false {
+	} else if !txnresp.Succeeded {
 		return false, nil
 	}
 	return true, nil

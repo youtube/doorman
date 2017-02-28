@@ -48,7 +48,7 @@ func CheckLeakedGoroutine() bool {
 	}
 
 	stackCount := make(map[string]int)
-	re := regexp.MustCompile("\\(0[0-9a-fx, ]*\\)")
+	re := regexp.MustCompile(`\(0[0-9a-fx, ]*\)`)
 	for _, g := range gs {
 		// strip out pointer arguments in first function of stack dump
 		normalized := string(re.ReplaceAll([]byte(g), []byte("(...)")))
@@ -74,12 +74,7 @@ func AfterTest(t *testing.T) {
 		"timeoutHandler":                               "a TimeoutHandler",
 		"net.(*netFD).connect(":                        "a timing out dial",
 		").noteClientGone(":                            "a closenotifier sender",
-	}
-
-	// readLoop was buggy before go1.5:
-	// https://github.com/golang/go/issues/10457
-	if getAtLeastGo15() {
-		badSubstring[").readLoop("] = "a Transport"
+		").readLoop(":                                  "a Transport",
 	}
 
 	var stacks string
@@ -125,12 +120,4 @@ func interestingGoroutines() (gs []string) {
 	}
 	sort.Strings(gs)
 	return
-}
-
-// getAtLeastGo15 returns true if the runtime has go1.5+.
-func getAtLeastGo15() bool {
-	var major, minor int
-	var discard string
-	i, err := fmt.Sscanf(runtime.Version(), "go%d.%d%s", &major, &minor, &discard)
-	return (err == nil && i == 3 && (major > 1 || major == 1 && minor >= 5))
 }
