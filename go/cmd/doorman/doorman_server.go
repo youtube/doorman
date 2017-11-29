@@ -65,7 +65,7 @@ var (
 	keyFile  = flag.String("key_file", "", "The TLS key file")
 
 	etcdEndpoints      = flag.String("etcd_endpoints", "", "comma separated list of etcd endpoints")
-	masterDelay        = flag.Duration("master_delay", 10*time.Second, "delay in master elections")
+	masterLease = flag.Duration("master_lease", 10*time.Second, "lease in master elections")
 	masterElectionLock = flag.String("master_election_lock", "", "etcd path for the master election or empty for no master election")
 )
 
@@ -154,7 +154,7 @@ func main() {
 			log.Exit("-etcd_endpoints cannot be empty if -master_election_lock is provided")
 		}
 
-		masterElection = election.Etcd(etcdEndpointsSlice, *masterElectionLock, *masterDelay)
+		masterElection = election.NewEtcdElection(etcdEndpointsSlice, *masterElectionLock, *masterLease)
 	} else {
 		masterElection = election.Trivial()
 	}
