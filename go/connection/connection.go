@@ -39,7 +39,8 @@ const (
 
 // Connection contains information about connection between the server and the client.
 type Connection struct {
-	addr          string
+	addrs         []string
+	pinned        int
 	currentMaster string
 	Stub          pb.CapacityClient
 	conn          *rpc.ClientConn
@@ -51,13 +52,14 @@ func (connection *Connection) String() string {
 }
 
 // New creates a new Connection with the given server address.
-func New(addr string, options ...Option) (*Connection, error) {
+func New(addrs []string, options ...Option) (*Connection, error) {
 	connection := &Connection{
-		addr: addr,
-		Opts: getOptions(options),
+		addrs:  addrs,
+		pinned: -1,
+		Opts:   getOptions(options),
 	}
 
-	if err := connection.connect(addr); err != nil {
+	if err := connection.tryConnect(); err != nil {
 		return nil, err
 	}
 
@@ -100,6 +102,18 @@ func DialOpts(dialOpts ...rpc.DialOption) Option {
 	}
 }
 
+//
+func (connection *Connection) tryConnect() error {
+	var err error
+	len := len(connection.addrs)
+	next := connection.pinned + 1
+
+	for i := next; err != nil && i < next+len; i++ {
+		err = connection.connect(connection.addrs[i%len(connection.addrs)])
+	}
+	return err
+}
+
 // connect connects the client to the server at addr.
 func (connection *Connection) connect(addr string) error {
 	connection.Close()
@@ -107,14 +121,29 @@ func (connection *Connection) connect(addr string) error {
 
 	conn, err := rpc.Dial(addr, connection.Opts.DialOpts...)
 	if err != nil {
-		log.Errorf("connection failed: %v", err)
+		log.Errorf("connect addr %v failed, err: %v", addr, err)
 		return err
 	}
 
+	connection.updateConnectionInfo(addr, conn)
+	return nil
+}
+
+//
+func (connection *Connection) updateConnectionInfo(addr string, conn *rpc.ClientConn) {
 	connection.conn, connection.Stub = conn, pb.NewCapacityClient(conn)
 	connection.currentMaster = addr
 
-	return nil
+	found := false
+	for i, address := range connection.addrs {
+		if address == addr {
+			found = true
+			connection.pinned = i
+		}
+	}
+	if !found {
+		log.Errorf("addr %s is not in predefined addresses %v", addr, connection.addrs)
+	}
 }
 
 // ExecuteRPC executes an RPC against the current master.
@@ -155,7 +184,7 @@ func (connection *Connection) runMasterAware(callback func() (HasMastership, err
 		// If there is no current client connection, connect to the original target.
 		// If that fails, retry.
 		if connection.conn == nil {
-			if err := connection.connect(connection.addr); err != nil {
+			if err := connection.tryConnect(); err != nil {
 				// The connection failed. Retry.
 				continue
 			}
