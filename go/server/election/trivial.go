@@ -14,6 +14,8 @@
 
 package election
 
+import "context"
+
 type trivial struct {
 	isMaster chan bool
 	current  chan string

@@ -16,9 +16,9 @@ import (
 	"golang.org/x/net/context"
 )
 
-// Source is a source for configuration. Calling it will block until a
+// ConfigReader is a source for configuration. Calling it will block until a
 // new version of the config is available.
-type Source func(context.Context) (data []byte, err error)
+type ConfigReader func(context.Context) (data []byte, err error)
 
 type pair struct {
 	data []byte
@@ -28,7 +28,7 @@ type pair struct {
 // LocalFiles is a configuration stored in a file in the local
 // filesystem. The file will be reloaded if the process receives a
 // SIGHUP.
-func LocalFile(path string) Source {
+func LocalFile(path string) ConfigReader {
 	updates := make(chan pair, 1)
 
 	c := make(chan os.Signal, 1)
@@ -53,7 +53,7 @@ func LocalFile(path string) Source {
 
 // Etcd is a configuration stored in etcd. It will be reloaded as soon
 // as it changes.
-func Etcd(path string, endpoints []string) Source {
+func Etcd(path string, endpoints []string) ConfigReader {
 
 	updates := make(chan pair, 1)
 	req := make(chan context.Context)
@@ -120,3 +120,4 @@ func ParseSource(text string) (kind string, path string) {
 
 	return "file", text
 }
+

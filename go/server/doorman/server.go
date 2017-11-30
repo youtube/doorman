@@ -22,10 +22,6 @@ package doorman
 
 import (
 	"errors"
-	"path/filepath"
-	"sync"
-	"time"
-
 	log "github.com/golang/glog"
 	"github.com/golang/protobuf/proto"
 	"github.com/prometheus/client_golang/prometheus"
@@ -35,8 +31,21 @@ import (
 	"golang.org/x/net/context"
 	rpc "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"path/filepath"
+	"sync"
+	"time"
 
+	_ "expvar"
+	"fmt"
+	"github.com/ghodss/yaml"
+	"github.com/youtube/doorman/go/cmd/doorman/option"
+	"github.com/youtube/doorman/go/configuration"
+	"github.com/youtube/doorman/go/status"
 	pb "github.com/youtube/doorman/proto/doorman"
+	"net"
+	"net/http"
+	_ "net/http/pprof"
 )
 
 var (
@@ -481,16 +490,101 @@ func (server *Server) triggerElection(ctx context.Context) error {
 	return nil
 }
 
+func Run(config *option.ServerConfiguration) error {
+	s, err := NewServer(config, connection.DialOpts(rpc.WithTimeout(config.RpcDialTimeout)))
+	if err != nil {
+		return err
+	}
+
+	var opts []rpc.ServerOption
+	if config.EnableTls {
+		log.Infof("Loading credentials from %v and %v.", config.CertFile, config.KeyFile)
+		creds, err := credentials.NewServerTLSFromFile(config.CertFile, config.KeyFile)
+		if err != nil {
+			return fmt.Errorf("Failed to generate credentials,err: %v", err)
+		}
+		opts = []rpc.ServerOption{rpc.Creds(creds)}
+	}
+	server := rpc.NewServer(opts...)
+	pb.RegisterCapacityServer(server, s)
+
+	var reader configuration.ConfigReader
+	kind, path := configuration.ParseSource(config.Config)
+	switch {
+	case kind == "file":
+		reader = configuration.LocalFile(path)
+	case kind == "etcd":
+		if len(config.EtcdEndpoints) == 1 && config.EtcdEndpoints[0] == "" {
+			fmt.Errorf("-etcd_endpoints cannot be empty if a config source etcd is provided")
+		}
+		reader = configuration.Etcd(path, config.EtcdEndpoints)
+	default:
+		return fmt.Errorf("can't read config from %v", config.Config)
+	}
+
+	// Try to load the background. If there's a problem with loading
+	// the server for the first time, the server will keep running,
+	// but will not serve traffic.
+	go func() {
+		for {
+			data, err := reader(context.Background())
+			if err != nil {
+				log.Errorf("cannot load config data: %v", err)
+				continue
+			}
+			cfg := new(pb.ResourceRepository)
+			if err := yaml.Unmarshal(data, cfg); err != nil {
+				log.Errorf("cannot unmarshal config data: %q", data)
+				continue
+			}
+
+			if err := s.LoadConfig(context.Background(), cfg, map[string]*time.Time{}); err != nil {
+				log.Errorf("cannot load config: %v", err)
+			}
+		}
+	}()
+
+	status.AddStatusPart("Doorman", option.Statusz, func(context.Context) interface{} { return s.Status() })
+
+	// Redirect form / to /debug/status.
+	http.Handle("/", http.RedirectHandler("/debug/status", http.StatusMovedPermanently))
+	AddServer(s)
+
+	http.Handle("/metrics", prometheus.Handler())
+
+	go http.ListenAndServe(fmt.Sprintf(":%v", config.DebugPort), nil)
+
+	// Waits for the server to get its initial configuration. This guarantees that
+	// the server will never run without a valid configuration.
+	log.Info("Waiting for the server to be configured...")
+	s.WaitUntilConfigured()
+
+	// Runs the server.
+	log.Info("Server is configured, ready to go!")
+
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", config.Port))
+	if err != nil {
+		return err
+	}
+
+	server.Serve(lis)
+	return nil
+}
+
 // New returns a new unconfigured server. parentAddr is the address of
 // a parent, pass the empty string to create a root server. This
 // function should be called only once, as it registers metrics.
-func New(ctx context.Context, id string, parentAddr string, leader election.Election, opts ...connection.Option) (*Server, error) {
-	s, err := NewIntermediate(ctx, id, parentAddr, leader, opts...)
+func NewServer(config *option.ServerConfiguration, opts ...connection.Option) (*Server, error) {
+	s, err := NewIntermediate(context.Background(), config, opts)
 	if err != nil {
-		return nil, err
+		return s, fmt.Errorf("failed to create new server, err: %v", err)
 	}
 
-	return s, prometheus.Register(s)
+	err = prometheus.Register(s)
+	if err != nil {
+		return s, fmt.Errorf("failed to register to prometheus, err: %v", err)
+	}
+	return s, nil
 }
 
 // Describe implements prometheus.Collector.
@@ -512,19 +606,19 @@ func (server *Server) Collect(ch chan<- prometheus.Metric) {
 }
 
 // NewIntermediate creates a server connected to the lower level server.
-func NewIntermediate(ctx context.Context, id string, addr string, leader election.Election, opts ...connection.Option) (*Server, error) {
+func NewIntermediate(ctx context.Context, config *option.ServerConfiguration, opts ...connection.Option) (*Server, error) {
 	var (
 		conn    *connection.Connection
 		updater updater
 		err     error
 	)
 
-	isRootServer := addr == ""
+	isRootServer := (config.ParentServers == nil || len(config.ParentServers) == 0)
 
 	// Set up some configuration for intermediate server: establish a connection
 	// to a lower-level server (e.g. the root server) and assign the updater function.
 	if !isRootServer {
-		if conn, err = connection.New(addr, opts...); err != nil {
+		if conn, err = connection.New(config.ParentServers, opts...); err != nil {
 			return nil, err
 		}
 
@@ -533,9 +627,16 @@ func NewIntermediate(ctx context.Context, id string, addr string, leader electio
 		}
 	}
 
+	var masterElection election.Election
+	if config.MasterElectionLock != "" {
+		masterElection = election.NewEtcdElection(config.EtcdEndpoints, config.MasterElectionLock, config.MasterLease)
+	} else {
+		masterElection = election.Trivial()
+	}
+
 	server := &Server{
-		ID:             id,
-		Election:       leader,
+		ID:             option.GetServerID(config.Port, config.HostName),
+		Election:       masterElection,
 		isConfigured:   make(chan bool),
 		resources:      make(map[string]*Resource),
 		becameMasterAt: time.Unix(0, 0),

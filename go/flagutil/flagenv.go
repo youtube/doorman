@@ -1,5 +1,5 @@
-// Package flagenv allows setting flags from the command line.
-package flagenv
+// Package flagutil allows setting flags from the command line.
+package flagutil
 
 import (
 	"flag"
@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	log "github.com/golang/glog"
+	"github.com/spf13/pflag"
 )
 
 // NOTE(ryszard): This code is heavily inspired by
@@ -19,7 +20,7 @@ import (
 // prepended with prefix and an underscore. So, if prefix is
 // "DOORMAN", and the flag's name "foo-bar", the environment variable
 // DOORMAN_FOO_BAR will be used.
-func Populate(set *flag.FlagSet, prefix string) error {
+func Populate(set *pflag.FlagSet, prefix string) error {
 	var (
 		setThroughFlags = make(map[string]bool)
 		knownEnv        = make(map[string]bool)
