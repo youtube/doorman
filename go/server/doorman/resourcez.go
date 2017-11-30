@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package doorman
 
 // Implements /resourcez, a page which gives detail information about
 // outstanding leases.
@@ -23,8 +23,6 @@ import (
 	"sync"
 
 	log "github.com/golang/glog"
-
-	"github.com/youtube/doorman/go/server/doorman"
 )
 
 var (
@@ -32,7 +30,7 @@ var (
 	tmpl *template.Template
 
 	// A slice of Doorman servers which have registered with us.
-	servers []*doorman.Server
+	servers []*Server
 
 	// A mutex which protects the global data in this module.
 	mu sync.RWMutex
@@ -47,11 +45,11 @@ func init() {
 	tmpl = template.Must(template.New("resourcez").Parse(resourcezHTML))
 
 	// Makes the slice that holds the servers for which we need to provide information.
-	servers = make([]*doorman.Server, 0, 5)
+	servers = make([]*Server, 0, 5)
 }
 
 // AddServer adds a Doorman server to the list of servers that we provide information for.
-func AddServer(dm *doorman.Server) {
+func AddServer(dm *Server) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -138,8 +136,8 @@ const resourcezHTML = `
 // engine and which gets inserted into the template.
 type resourcezData struct {
 	Resource            string
-	ServerStatus        []doorman.ServerStatus
-	ResourceLeaseStatus []doorman.ResourceLeaseStatus
+	ServerStatus        []ServerStatus
+	ResourceLeaseStatus []ResourceLeaseStatus
 }
 
 // resourcezHandler is the handler function that gets called for a request
@@ -152,8 +150,8 @@ func resourcezHandler(w http.ResponseWriter, r *http.Request) {
 	// Creates the data structure for the template.
 	data := resourcezData{
 		Resource:            r.FormValue("resource"),
-		ServerStatus:        make([]doorman.ServerStatus, 0, len(servers)),
-		ResourceLeaseStatus: make([]doorman.ResourceLeaseStatus, 0, len(servers)),
+		ServerStatus:        make([]ServerStatus, 0, len(servers)),
+		ResourceLeaseStatus: make([]ResourceLeaseStatus, 0, len(servers)),
 	}
 
 	// Goes through all the servers and fills in their information in the data object.
