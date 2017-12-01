@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"github.com/youtube/doorman/go/client/doorman"
+	"strings"
 )
 
 var (
@@ -63,7 +64,7 @@ func main() {
 		opts = append(opts, grpc.WithInsecure())
 	}
 
-	client, err := doorman.NewWithID(*server, *clientID, doorman.DialOpts(opts...))
+	client, err := doorman.NewWithID(strings.Split(*server,","), *clientID, doorman.DialOpts(opts...))
 
 	if err != nil {
 		log.Exitf("could not create client: %v", err)

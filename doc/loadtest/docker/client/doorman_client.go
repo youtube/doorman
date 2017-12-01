@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc"
 
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
+	"strings"
 )
 
 var (
@@ -83,7 +84,7 @@ func main() {
 		id := uuid.New()
 		log.Infof("client %v with id %v", i, id)
 
-		client, err := doorman.NewWithID(*addr, id, doorman.DialOpts(grpc.WithInsecure()))
+		client, err := doorman.NewWithID(strings.Split(*addr,","), id, doorman.DialOpts(grpc.WithInsecure()))
 		if err != nil {
 			log.Exit(err)
 		}

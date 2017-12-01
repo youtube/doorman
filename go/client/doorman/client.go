@@ -111,7 +111,8 @@ func getClientID() string {
 		panic(fmt.Sprintf("Can't determine hostname: %v", err))
 	}
 
-	return fmt.Sprintf("%s:%d:%d", hostname, os.Getpid(), idCount)
+	idCount++
+	return fmt.Sprintf("%s:%d:%d", hostname, os.Getpid(), idCount-1)
 }
 
 // MinimumRefreshInterval sets the minimum refresh interval for
@@ -169,13 +170,13 @@ type Client struct {
 // New creates a new client connected to server available at addr. It
 // will use the hostname to generate a client id. If you need finer
 // control over the client's id, use NewWithID.
-func New(addr string, opts ...Option) (*Client, error) {
+func New(addr []string, opts ...Option) (*Client, error) {
 	return NewWithID(addr, getClientID(), opts...)
 }
 
 // NewWithID creates a new client connected to server available at
 // addr, identifying using the custom id provided.
-func NewWithID(addr string, id string, opts ...Option) (*Client, error) {
+func NewWithID(addr []string, id string, opts ...Option) (*Client, error) {
 	var connectionOpts []connection.Option
 	for _, opt := range opts {
 		connectionOpts = append(connectionOpts, connection.Option(opt))
