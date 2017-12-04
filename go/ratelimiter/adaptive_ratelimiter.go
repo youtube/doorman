@@ -27,7 +27,7 @@ import (
 // optional capacity to request. It will try to fo as fast as possible,
 // but it will release some capacity if the client cannot keep up with
 // the capacity it received.
-type AdaptiveQPS struct {
+type adaptiveQPS struct {
 	ratelimiter RateLimiter
 	resource    doorman.Resource
 	entry       chan time.Time
@@ -35,9 +35,11 @@ type AdaptiveQPS struct {
 	opts        *adaptiveOptions
 }
 
+var _ RateLimiter = &adaptiveQPS{}
+
 // NewAdaptiveQPS creates a rate limiter connected to the resource.
 func NewAdaptiveQPS(res doorman.Resource, options ...AdaptiveOption) RateLimiter {
-	arl := &AdaptiveQPS{
+	arl := &adaptiveQPS{
 		ratelimiter: NewQPS(res),
 		resource:    res,
 		entry:       make(chan time.Time),
@@ -50,7 +52,7 @@ func NewAdaptiveQPS(res doorman.Resource, options ...AdaptiveOption) RateLimiter
 }
 
 // run takes care of receiving new duration record from waiting goroutines.
-func (arl *AdaptiveQPS) run() {
+func (arl *adaptiveQPS) run() {
 	// entries is used to record entry times to Wait method.
 	e := &entries{
 		times: make([]time.Time, 0),
@@ -156,7 +158,7 @@ func (e *entries) GetWants(window time.Duration) float64 {
 }
 
 // Wait records entry time and blocks until the goroutine is released.
-func (arl *AdaptiveQPS) Wait(ctx context.Context) error {
+func (arl *adaptiveQPS) Wait(ctx context.Context) error {
 	// TODO: if entry is closed and we try to send
 	// a value via it, it will cause panic.
 	//
@@ -173,7 +175,12 @@ func (arl *AdaptiveQPS) Wait(ctx context.Context) error {
 }
 
 // Close closes the adjustible rate limiter. It should be called only once.
-func (arl *AdaptiveQPS) Close() {
+func (arl *adaptiveQPS) Close() {
 	arl.quit <- true
 	arl.ratelimiter.Close()
+}
+
+// Return only necessary for in flight ratelimiter
+func (arl *adaptiveQPS) Return(ctx context.Context) error {
+	return nil
 }
