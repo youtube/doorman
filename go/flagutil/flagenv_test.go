@@ -1,4 +1,4 @@
-package flagenv
+package flagutil
 
 import (
 	"flag"
