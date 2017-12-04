@@ -123,18 +123,19 @@ func (e *etcdElection) campaignAndRenew(ctx context.Context, id string) {
 		for {
 			time.Sleep(e.lease / 5)
 			log.V(2).Infof("Renewing mastership lease at %v as %v", e.lock, id)
-			_, err := e.client.Set(ctx, e.lock, id, &client.SetOptions{
-				TTL:       e.lease,
-				PrevExist: client.PrevExist,
-				PrevValue: id,
-			})
-
-			for retry := 0; retry < 2; retry++ {
+			var err error
+			for retry := 0; retry < 3; retry++ {
 				_, err = e.client.Set(ctx, e.lock, id, &client.SetOptions{
 					TTL:       e.lease,
 					PrevExist: client.PrevExist,
 					PrevValue: id,
 				})
+
+				if err != nil {
+					time.Sleep(e.lease / 5)
+				} else {
+					break
+				}
 			}
 
 			if err != nil {
