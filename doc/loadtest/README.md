@@ -192,8 +192,8 @@ Now, let's create the Docker images that we will use to run our services. I am a
 
 ```console
 $ docker build -t gcr.io/google.com/doorman/doorman-server:v0.1.7 doc/loadtest/docker/server/
-$ docker build -t gcr.io/google.com/doorman/doorman-client:v0.1.7 doc/loadtest/docker/server/
-$ docker build -t gcr.io/google.com/doorman/target:v0.1 doc/loadtest/docker/server/
+$ docker build -t gcr.io/google.com/doorman/doorman-client:v0.1.7 doc/loadtest/docker/client/
+$ docker build -t gcr.io/google.com/doorman/target:v0.1 doc/loadtest/docker/target/
 $ docker build -t gcr.io/google.com/doorman/prometheus:v0.2 doc/loadtest/docker/prometheus
 ```
 
