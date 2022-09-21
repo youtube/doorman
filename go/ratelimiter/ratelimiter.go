@@ -93,7 +93,7 @@ func (rl *qpsRateLimiter) recalculate(rate int, interval int) (newRate int, left
 		newRate = rate / rl.subintervals
 		leftoverRate = rate % rl.subintervals
 
-		interval = int(float64(newRate*interval) / float64(rate))
+		interval = int(float64(interval) / float64(rl.subintervals))
 		newInterval = time.Duration(interval) * time.Millisecond
 	}
 	return
