@@ -152,7 +152,7 @@ func (e *entries) GetWants(window time.Duration) float64 {
 		sum += frequency[i] * (n - i)
 	}
 
-	return float64(sum) / float64(len(e.times)*(len(e.times)+1)/2)
+	return float64(sum) / float64(int(window.Seconds())*(int(window.Seconds())+1)/2)
 }
 
 // Wait records entry time and blocks until the goroutine is released.
